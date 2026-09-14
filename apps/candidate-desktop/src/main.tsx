@@ -404,7 +404,7 @@ function App() {
 
   async function checkSidecarHealth() {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 1200);
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
     try {
       const response = await fetch(`${AI_ENGINE_BASE}/health`, {
         headers: TUNNEL_BYPASS_HEADERS,

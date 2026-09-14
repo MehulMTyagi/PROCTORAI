@@ -73,8 +73,8 @@ Seed users:
   - `https://candidate-desktop.vercel.app`
   - Deployment URL: `https://candidate-desktop-7bupdkdpw-mehul-tyagis-projects.vercel.app`
 - The deployed portals are currently wired to temporary public LocalTunnel URLs:
-  - ProctorAI API tunnel: `https://social-melons-camp.loca.lt`
-  - AI sidecar tunnel: `https://breezy-dragons-win.loca.lt`
+  - ProctorAI API tunnel: `https://wicked-duck-66.loca.lt`
+  - AI sidecar tunnel: `https://tricky-moose-59.loca.lt`
 - Local services backing those tunnels must stay running on this machine:
   - API: `http://127.0.0.1:8010`
   - AI sidecar: `http://127.0.0.1:8765`
@@ -91,6 +91,28 @@ Seed users:
   - answer save;
   - submit with score `5 / 5`.
 - Important limitation: this is a working public demo path, not a durable cloud backend. If the local machine, local API/AI processes, or LocalTunnel sessions stop, the deployed portals will stop sharing data. A permanent multi-device deployment still needs a hosted backend plus cloud Postgres, or equivalent managed storage.
+
+2026-09-14 tunnel recovery and candidate system-check fix:
+
+- Previous API tunnel `https://social-melons-camp.loca.lt` started returning `503`, while the local API on `http://127.0.0.1:8010` was still healthy.
+- Started fresh LocalTunnel sessions:
+  - API: `https://wicked-duck-66.loca.lt`
+  - AI sidecar: `https://tricky-moose-59.loca.lt`
+- Redeployed production Vercel aliases with the fresh tunnel URLs:
+  - `https://web-portal-six-kappa.vercel.app`
+  - `https://candidate-desktop.vercel.app`
+- Candidate System requirements initially still failed Local monitoring because the AI sidecar health check timeout was only `1200ms`; tunnel requests often take `2-3s`.
+- Increased the candidate AI sidecar health timeout to `8000ms`.
+- Rebuilt and redeployed candidate production alias.
+- Live Playwright browser smoke passed:
+  - web portal loaded without `Failed to fetch`;
+  - created an assessment;
+  - added MCQ;
+  - assigned `Dev Candidate`;
+  - proctor page loaded without `Failed to fetch`;
+  - candidate portal found the assessment;
+  - candidate System requirements passed both Assessment connection and Local monitoring.
+- Reason the portals go offline often: the current deployment still depends on free LocalTunnel sessions from this laptop. Tunnels can drop, URLs can change, and latency can spike. A stable multi-device setup requires hosting `services/api` on a durable backend and using cloud Postgres instead of tunneling the local machine.
 
 2026-09-14 Vercel portal connection bug fix:
 
