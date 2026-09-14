@@ -62,6 +62,31 @@ Seed users:
 
 ## Latest Stabilization Pass
 
+2026-09-14 automatic integrity proof for proctor review:
+
+- Candidate automatic integrity events now attach a proof bundle in event metadata and set `evidence_status` to `READY`.
+- Proof bundle includes:
+  - proof kind (`CAMERA_SNAPSHOT` when a frame is available, otherwise `SESSION_LOG`);
+  - capture timestamp;
+  - fullscreen/page visibility state;
+  - viewport size;
+  - camera snapshot data URL when available;
+  - SHA-256 hash of the attached snapshot data URL;
+  - a proctor-facing review note.
+- AI face events (`FACE_ABSENT`, `MULTIPLE_PERSONS`) include face count, sidecar model info, sample count, and the frame that triggered the AI analysis when available.
+- Browser/session events (`FULLSCREEN_EXIT`, `APP_FOCUS_LOST`, `HEARTBEAT_GAP`) include proof context and use a camera snapshot when the sampler has a current frame.
+- Proctor portal now watches the selected assigned assessment instead of always watching the seeded dev assessment.
+- Proctor portal keeps a 5-second polling fallback so events still arrive even when the WebSocket badge is offline or LocalTunnel is unreliable.
+- Proctor event queue now renders a proof review block with snapshot image, proof type, review note, capture time, fullscreen/page state, and SHA-256 preview.
+- Regression and verification:
+  - `python -m pytest services/api/tests/test_events.py -q` -> `8 passed`
+  - `npm run build:candidate` -> passed
+  - `npm run build:web` -> passed
+  - Redeployed production Vercel aliases.
+  - Live API smoke created a `FACE_ABSENT` event with `evidence_status=READY`; proctor listing returned `proof.kind=CAMERA_SNAPSHOT`.
+  - Live Playwright smoke confirmed the deployed proctor UI renders `FACE ABSENT`, `CAMERA SNAPSHOT`, and the proof review note.
+- This is reviewable proof embedded in event metadata for the public demo. The larger Week 6 protected evidence-file pipeline with durable media storage, clip hashing, playback authorization, retention, and cleanup remains the next hardening step.
+
 2026-09-14 Vercel/tunnel demo:
 
 - Closed the unrelated IP-SAKTI FastAPI process that was occupying local port `8000`; `8000` was then free.

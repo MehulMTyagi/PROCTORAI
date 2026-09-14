@@ -133,6 +133,52 @@ def test_proctor_can_list_assigned_assessment_events(
     assert response.json()[0]["event_type"] == "APP_FOCUS_LOST"
 
 
+def test_candidate_event_with_proof_is_visible_to_proctor(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    assessment, attempt = _create_attempt(db_session)
+    candidate_token = _token(client, "candidate@example.com")
+
+    create_response = client.post(
+        f"/attempts/{attempt.id}/events",
+        headers={"Authorization": f"Bearer {candidate_token}"},
+        json={
+            "event_type": "FACE_ABSENT",
+            "severity": "HIGH",
+            "confidence": 0.96,
+            "priority_score": 9,
+            "evidence_status": "READY",
+            "metadata": {
+                "source": "camera_sampler",
+                "proof": {
+                    "kind": "CAMERA_SNAPSHOT",
+                    "review_note": "Camera snapshot captured locally at the time of the signal.",
+                    "camera_snapshot": {
+                        "data_url": "data:image/jpeg;base64,proof",
+                        "sha256_hash": "a" * 64,
+                    },
+                },
+            },
+        },
+    )
+
+    assert create_response.status_code == 201
+    assert create_response.json()["evidence_status"] == "READY"
+
+    proctor_token = _token(client, "proctor@example.com")
+    list_response = client.get(
+        f"/proctor/assessments/{assessment.id}/events",
+        headers={"Authorization": f"Bearer {proctor_token}"},
+    )
+
+    assert list_response.status_code == 200
+    event = list_response.json()[0]
+    assert event["event_type"] == "FACE_ABSENT"
+    assert event["evidence_status"] == "READY"
+    assert event["metadata"]["proof"]["camera_snapshot"]["sha256_hash"] == "a" * 64
+
+
 def test_non_candidate_cannot_create_attempt_event(
     client: TestClient,
     db_session: Session,

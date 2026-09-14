@@ -53,6 +53,19 @@ type IntegrityEvent = {
   evidence_status: string;
   metadata: Record<string, unknown>;
 };
+type EventProof = {
+  kind?: string;
+  captured_at?: string;
+  review_note?: string;
+  page_hidden?: boolean;
+  fullscreen_active?: boolean;
+  camera_snapshot?: {
+    data_url?: string;
+    mime_type?: string;
+    sha256_hash?: string;
+    size_bytes?: number;
+  } | null;
+};
 type Session = { token: string; user: User; bootstrap: Bootstrap };
 type AccountMode = "EXAMINER" | "PROCTOR";
 
@@ -86,6 +99,11 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+function eventProof(event: IntegrityEvent): EventProof | null {
+  const proof = event.metadata?.proof;
+  return proof && typeof proof === "object" ? proof as EventProof : null;
 }
 
 async function login(mode: AccountMode): Promise<Session> {
@@ -155,6 +173,15 @@ function App() {
     setSelected(detail);
   }
 
+  async function loadEvents(assessmentId: string, token = session?.token) {
+    if (!token) return;
+    setEvents(
+      await api<IntegrityEvent[]>(`/proctor/assessments/${assessmentId}/events`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    );
+  }
+
   async function loadMode(nextMode: AccountMode = mode) {
     setStatus("loading");
     setError(null);
@@ -175,12 +202,10 @@ function App() {
       else setSelected(null);
 
       if (nextMode === "PROCTOR") {
-        setEvents(
-          await api<IntegrityEvent[]>(
-            `/proctor/assessments/${nextSession.bootstrap.assessment_id}/events`,
-            { headers },
-          ),
-        );
+        if (nextAssessments[0]) await loadEvents(nextAssessments[0].id, nextSession.token);
+        else setEvents([]);
+      } else {
+        setEvents([]);
       }
       setStatus("ready");
     } catch (nextError) {
@@ -194,10 +219,10 @@ function App() {
   }, [mode]);
 
   useEffect(() => {
-    if (!session || mode !== "PROCTOR") return;
+    if (!session || mode !== "PROCTOR" || !selected) return;
     const wsBase = API_BASE.replace(/^http/, "ws");
     const socket = new WebSocket(
-      `${wsBase}/ws/proctor/assessments/${session.bootstrap.assessment_id}?token=${session.token}`,
+      `${wsBase}/ws/proctor/assessments/${selected.id}?token=${session.token}`,
     );
     socket.onopen = () => setSocketState("live");
     socket.onclose = () => setSocketState("offline");
@@ -207,7 +232,15 @@ function App() {
       setEvents((current) => [nextEvent, ...current.filter((event) => event.id !== nextEvent.id)]);
     };
     return () => socket.close();
-  }, [mode, session]);
+  }, [mode, session, selected?.id]);
+
+  useEffect(() => {
+    if (!session || mode !== "PROCTOR" || !selected) return;
+    const interval = window.setInterval(() => {
+      void loadEvents(selected.id).catch(() => setSocketState((current) => current === "live" ? current : "offline"));
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [mode, session, selected?.id]);
 
   async function createAssessment() {
     setStatus("saving");
@@ -331,7 +364,7 @@ function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">{mode === "EXAMINER" ? "Examiner Workspace" : "Proctor Dashboard"}</p>
-            <h1>{mode === "EXAMINER" ? "Assessment Setup" : session?.bootstrap.assessment_title ?? "Connecting"}</h1>
+            <h1>{mode === "EXAMINER" ? "Assessment Setup" : selected?.title ?? session?.bootstrap.assessment_title ?? "Connecting"}</h1>
           </div>
           <div className={`status-pill ${mode === "PROCTOR" ? socketState : status}`}>
             {mode === "PROCTOR" ? <Radio size={16} /> : <CheckCircle2 size={16} />}
@@ -584,6 +617,32 @@ function App() {
                           <span>Priority {event.priority_score}</span>
                           <span>Evidence {event.evidence_status}</span>
                         </div>
+                        {eventProof(event) ? (
+                          <div className="event-proof">
+                            {eventProof(event)?.camera_snapshot?.data_url ? (
+                              <img alt={`${event.event_type.replaceAll("_", " ")} proof`} src={eventProof(event)?.camera_snapshot?.data_url} />
+                            ) : null}
+                            <div>
+                              <strong>{eventProof(event)?.kind?.replaceAll("_", " ") ?? "Session proof"}</strong>
+                              <span>{eventProof(event)?.review_note ?? "Review the event context before making a decision."}</span>
+                              <small>
+                                Captured {eventProof(event)?.captured_at ? new Date(eventProof(event)!.captured_at!).toLocaleString() : "during attempt"}
+                                {" | "}Fullscreen {eventProof(event)?.fullscreen_active ? "active" : "inactive"}
+                                {" | "}Page {eventProof(event)?.page_hidden ? "hidden" : "visible"}
+                              </small>
+                              {eventProof(event)?.camera_snapshot?.sha256_hash ? (
+                                <code>SHA-256 {eventProof(event)?.camera_snapshot?.sha256_hash?.slice(0, 16)}...</code>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="event-proof">
+                            <div>
+                              <strong>Metadata only</strong>
+                              <span>No proof bundle was attached to this older event.</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </article>
                   ))}

@@ -184,6 +184,14 @@ Setup pages use hash routes under the candidate runner, for example `http://127.
 
 The requirement checks are candidate-side readiness gates. The backend still remains the source of truth for authentication, assignments, attempts, answers, and submitted scores.
 
+## Proctor Evidence Review
+
+Candidate integrity signals are sent to the proctor queue automatically during an active attempt. Current automatic signals include fullscreen exits, focus loss, heartbeat gaps, face absence, and multiple-person detections.
+
+Each new event includes review proof in the event metadata and is marked `READY` when proof is attached. Camera-based signals include a local snapshot, hash, timestamp, model/sample details, and session state. Browser/session signals include fullscreen and visibility context, and use the current camera sampler frame when one is available. The proctor dashboard renders this proof beside each event for human review.
+
+This proof path is intended for the live MVP demo. The next production hardening step is the Week 6 evidence-file pipeline with protected media storage, short clip generation, playback controls, retention, and cleanup.
+
 ## Public Demo Deployment
 
 Current Vercel demo URLs:

@@ -61,6 +61,8 @@ type IntegrityEvent = {
   event_type: string;
   status: string;
   priority_score: number;
+  evidence_status: string;
+  metadata: Record<string, unknown>;
 };
 type AiModelInfo = {
   name: string;
@@ -165,6 +167,12 @@ function buildOperation(
     queued_at: new Date().toISOString(),
     status: "queued",
   };
+}
+
+async function sha256Hex(input: string) {
+  const bytes = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function App() {
@@ -355,6 +363,7 @@ function App() {
     severity = "MEDIUM",
     priorityScore = 5,
     automatic = false,
+    snapshotDataUrl?: string | null,
   ) {
     if (!attempt || isSubmitted || !session) {
       if (!automatic) setError("Start the assessment attempt before sending a monitoring event.");
@@ -364,6 +373,27 @@ function App() {
     const now = Date.now();
     if (automatic && now - (autoEventRef.current[eventType] ?? 0) < 5000) return;
     autoEventRef.current[eventType] = now;
+    const capturedAt = new Date().toISOString();
+    const snapshot = snapshotDataUrl ?? captureFrameDataUrl();
+    const proof = {
+      kind: snapshot ? "CAMERA_SNAPSHOT" : "SESSION_LOG",
+      captured_at: capturedAt,
+      source: metadata.source ?? "candidate-monitor",
+      page_hidden: document.hidden,
+      fullscreen_active: Boolean(document.fullscreenElement),
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      camera_snapshot: snapshot
+        ? {
+            data_url: snapshot,
+            mime_type: snapshot.slice(5, snapshot.indexOf(";")) || "image/jpeg",
+            size_bytes: snapshot.length,
+            sha256_hash: await sha256Hex(snapshot),
+          }
+        : null,
+      review_note: snapshot
+        ? "Camera snapshot captured locally at the time of the signal."
+        : "Browser/session state captured at the time of the signal.",
+    };
 
     const operation = buildOperation(
       "EVENT",
@@ -373,8 +403,8 @@ function App() {
         severity,
         confidence: automatic ? 1 : 0.88,
         priority_score: priorityScore,
-        evidence_status: "NOT_REQUIRED",
-        metadata: { ...metadata, automatic, queued_from: "candidate-week5-runner" },
+        evidence_status: "READY",
+        metadata: { ...metadata, automatic, queued_from: "candidate-week5-runner", proof },
       },
       eventType.replaceAll("_", " "),
     );
@@ -486,10 +516,13 @@ function App() {
             source,
             ai_engine_url: AI_ENGINE_BASE,
             samples_analyzed: analysis.state.samples_analyzed,
+            face_count: analysis.face_count,
+            model: analysis.model,
           },
           event.severity,
           event.priority_score,
           true,
+          frameDataUrl,
         );
       }
     } catch (nextError) {
