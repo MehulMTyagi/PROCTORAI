@@ -62,6 +62,22 @@ Seed users:
 
 ## Latest Stabilization Pass
 
+2026-09-14 real-time camera/microphone integrity events:
+
+- Candidate monitoring now emits additional integrity events during the active attempt, before submission:
+  - `CAMERA_DISABLED` when the camera stream cannot start, is muted, or ends/disconnects.
+  - `MICROPHONE_DISABLED` when the microphone stream cannot start, is muted, or ends/disconnects.
+  - `BACKGROUND_SPEECH` when the browser microphone monitor detects sustained audio/noise above threshold.
+  - `AI_ENGINE_INTERRUPTED` when sidecar frame analysis fails during monitoring.
+  - `PHONE_DETECTED` is wired through the live event/proof path with a candidate-side demo control; true automatic phone/object recognition still needs a dedicated object-detection model.
+- Background voice/noise detection is currently a Web Audio RMS-level heuristic for MVP review, not speaker identification or transcription.
+- Proctor rules JSON now includes `BACKGROUND_SPEECH`, `PHONE_DETECTED`, and `AI_ENGINE_INTERRUPTED`.
+- Proctor dashboard shows `polling` as a healthy fallback state when WebSocket is unavailable but the 5-second event poll is still loading events.
+- Verification:
+  - `python -m pytest services/api/tests/test_events.py -q` -> `8 passed`
+  - `npm run build:candidate` -> passed
+  - `npm run build:web` -> passed
+
 2026-09-14 automatic integrity proof for proctor review:
 
 - Candidate automatic integrity events now attach a proof bundle in event metadata and set `evidence_status` to `READY`.

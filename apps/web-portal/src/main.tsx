@@ -146,7 +146,10 @@ function App() {
         FULLSCREEN_EXIT: { enabled: true, severity: "HIGH", min_persistence_ms: 0 },
         HEARTBEAT_GAP: { enabled: true, severity: "HIGH", gap_threshold_ms: 15000 },
         CAMERA_DISABLED: { enabled: true, severity: "HIGH" },
-        MICROPHONE_DISABLED: { enabled: true, severity: "MEDIUM" },
+        MICROPHONE_DISABLED: { enabled: true, severity: "HIGH" },
+        BACKGROUND_SPEECH: { enabled: true, severity: "MEDIUM", sustained_audio_samples: 6 },
+        PHONE_DETECTED: { enabled: true, severity: "HIGH" },
+        AI_ENGINE_INTERRUPTED: { enabled: true, severity: "HIGH" },
         FACE_ABSENT: { enabled: true, severity: "HIGH", absent_frame_threshold: 3 },
         MULTIPLE_PERSONS: { enabled: true, severity: "HIGH", multiple_frame_threshold: 2 },
       },
@@ -237,7 +240,9 @@ function App() {
   useEffect(() => {
     if (!session || mode !== "PROCTOR" || !selected) return;
     const interval = window.setInterval(() => {
-      void loadEvents(selected.id).catch(() => setSocketState((current) => current === "live" ? current : "offline"));
+      void loadEvents(selected.id)
+        .then(() => setSocketState((current) => current === "live" ? current : "polling"))
+        .catch(() => setSocketState((current) => current === "live" ? current : "offline"));
     }, 5000);
     return () => window.clearInterval(interval);
   }, [mode, session, selected?.id]);

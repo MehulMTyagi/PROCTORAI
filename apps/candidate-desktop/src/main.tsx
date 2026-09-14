@@ -12,8 +12,10 @@ import {
   ScanFace,
   Send,
   ShieldCheck,
+  Smartphone,
   UserRoundX,
   UsersRound,
+  Volume2,
   Wifi,
   WifiOff,
 } from "lucide-react";
@@ -202,8 +204,10 @@ function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const microphoneStreamRef = useRef<MediaStream | null>(null);
   const flushingRef = useRef(false);
   const autoEventRef = useRef<Record<string, number>>({});
+  const audioSignalRef = useRef({ consecutiveLoudSamples: 0, lastSentAt: 0 });
   const readinessRef = useRef({ consentAccepted, readinessChecks });
   readinessRef.current = { consentAccepted, readinessChecks };
 
@@ -531,6 +535,19 @@ function App() {
         status: "error",
         detail: nextError instanceof Error ? nextError.message : "Face analysis failed",
       }));
+      void sendIntegrityEvent(
+        "AI_ENGINE_INTERRUPTED",
+        {
+          source: "ai_sidecar",
+          reason: "frame_analysis_failed",
+          ai_engine_url: AI_ENGINE_BASE,
+          error: nextError instanceof Error ? nextError.message : "Face analysis failed",
+        },
+        "HIGH",
+        8,
+        true,
+        frameDataUrl,
+      );
     }
   }
 
@@ -539,6 +556,36 @@ function App() {
     for (let index = 0; index < samples; index += 1) {
       await analyzeFaceSample(observedFaceCount, "manual_face_demo");
     }
+  }
+
+  function sendPhoneObjectEvent() {
+    void sendIntegrityEvent(
+      "PHONE_DETECTED",
+      {
+        source: "manual_object_demo",
+        detector: "candidate_review_control",
+        object_type: "phone",
+        review_note: "Phone/object integrity event captured with the current camera proof frame.",
+      },
+      "HIGH",
+      9,
+      false,
+    );
+  }
+
+  function sendBackgroundVoiceEvent() {
+    void sendIntegrityEvent(
+      "BACKGROUND_SPEECH",
+      {
+        source: "manual_audio_demo",
+        detector: "candidate_review_control",
+        signal: "background_voice_or_noise",
+        review_note: "Background voice/noise integrity event captured with the current session proof.",
+      },
+      "MEDIUM",
+      7,
+      false,
+    );
   }
 
   function readinessMetrics() {
@@ -657,6 +704,16 @@ function App() {
     }
 
     let cancelled = false;
+    const notifyCameraDisabled = (reason: string) => {
+      void sendIntegrityEvent(
+        "CAMERA_DISABLED",
+        { source: "camera_sampler", reason },
+        "HIGH",
+        8,
+        true,
+      );
+    };
+
     navigator.mediaDevices
       .getUserMedia({ video: { width: 320, height: 240 }, audio: false })
       .then((stream) => {
@@ -669,18 +726,118 @@ function App() {
           videoRef.current.srcObject = stream;
           void videoRef.current.play();
         }
+        stream.getVideoTracks().forEach((track) => {
+          track.onended = () => notifyCameraDisabled("camera_track_ended");
+          track.onmute = () => notifyCameraDisabled("camera_track_muted");
+        });
         setFaceMonitor((current) => ({ ...current, status: "camera", detail: "Camera sampler active" }));
       })
       .catch(() => {
         setFaceMonitor((current) => ({ ...current, status: "warning", detail: "Camera stream unavailable" }));
+        notifyCameraDisabled("camera_stream_unavailable");
       });
 
     return () => {
       cancelled = true;
+      streamRef.current?.getVideoTracks().forEach((track) => {
+        track.onended = null;
+        track.onmute = null;
+      });
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     };
-  }, [monitoringActive, sidecarReady]);
+  }, [monitoringActive, sidecarReady, session?.token, simulateOffline]);
+
+  useEffect(() => {
+    if (!monitoringActive || !navigator.mediaDevices?.getUserMedia) {
+      return;
+    }
+
+    let cancelled = false;
+    let audioContext: AudioContext | null = null;
+    let intervalId = 0;
+    const notifyMicrophoneDisabled = (reason: string, severity = "HIGH", priorityScore = 8) => {
+      void sendIntegrityEvent(
+        "MICROPHONE_DISABLED",
+        { source: "microphone_monitor", reason },
+        severity,
+        priorityScore,
+        true,
+      );
+    };
+
+    navigator.mediaDevices
+      .getUserMedia({ video: false, audio: true })
+      .then((stream) => {
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        microphoneStreamRef.current = stream;
+        stream.getAudioTracks().forEach((track) => {
+          track.onended = () => notifyMicrophoneDisabled("microphone_track_ended");
+          track.onmute = () => notifyMicrophoneDisabled("microphone_track_muted", "MEDIUM", 7);
+        });
+
+        audioContext = new AudioContext();
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        audioContext.createMediaStreamSource(stream).connect(analyser);
+        const timeDomainData = new Uint8Array(analyser.fftSize);
+        const threshold = 0.08;
+        const minimumSamples = 6;
+        const cooldownMs = 15000;
+
+        intervalId = window.setInterval(() => {
+          analyser.getByteTimeDomainData(timeDomainData);
+          let sumSquares = 0;
+          for (const value of timeDomainData) {
+            const centered = (value - 128) / 128;
+            sumSquares += centered * centered;
+          }
+          const rms = Math.sqrt(sumSquares / timeDomainData.length);
+          audioSignalRef.current.consecutiveLoudSamples =
+            rms > threshold ? audioSignalRef.current.consecutiveLoudSamples + 1 : 0;
+
+          if (
+            audioSignalRef.current.consecutiveLoudSamples >= minimumSamples &&
+            Date.now() - audioSignalRef.current.lastSentAt > cooldownMs
+          ) {
+            audioSignalRef.current.lastSentAt = Date.now();
+            void sendIntegrityEvent(
+              "BACKGROUND_SPEECH",
+              {
+                source: "microphone_monitor",
+                detector: "browser_audio_rms",
+                signal: "sustained_audio_level",
+                rms: Number(rms.toFixed(4)),
+                threshold,
+                samples_above_threshold: audioSignalRef.current.consecutiveLoudSamples,
+                review_note: "Sustained microphone activity detected; review for background voice or noise.",
+              },
+              "MEDIUM",
+              7,
+              true,
+            );
+          }
+        }, 500);
+      })
+      .catch(() => notifyMicrophoneDisabled("microphone_stream_unavailable"));
+
+    return () => {
+      cancelled = true;
+      if (intervalId) window.clearInterval(intervalId);
+      microphoneStreamRef.current?.getAudioTracks().forEach((track) => {
+        track.onended = null;
+        track.onmute = null;
+      });
+      microphoneStreamRef.current?.getTracks().forEach((track) => track.stop());
+      microphoneStreamRef.current = null;
+      audioSignalRef.current.consecutiveLoudSamples = 0;
+      void audioContext?.close();
+    };
+  }, [monitoringActive, session?.token, simulateOffline]);
 
   useEffect(() => {
     if (!monitoringActive || !sidecarReady) return;
@@ -1007,10 +1164,18 @@ function App() {
               <UsersRound size={17} aria-hidden="true" />
               Multiple People
             </button>
+            <button onClick={sendPhoneObjectEvent} disabled={!monitoringActive}>
+              <Smartphone size={17} aria-hidden="true" />
+              Phone/Object
+            </button>
+            <button onClick={sendBackgroundVoiceEvent} disabled={!monitoringActive}>
+              <Volume2 size={17} aria-hidden="true" />
+              Background Voice
+            </button>
           </div>
           <span>Last Event</span>
           <strong>{lastEvent ? lastEvent.event_type.replaceAll("_", " ") : "None"}</strong>
-          <small>{lastEvent ? `${lastEvent.status} | Priority ${lastEvent.priority_score}` : "Ready"}</small>
+          <small>{lastEvent ? `${lastEvent.status} | Priority ${lastEvent.priority_score} | Evidence ${lastEvent.evidence_status}` : "Ready"}</small>
           <span>Retry Queue</span>
           <strong>{retryQueue.length ? `${retryQueue.length} Pending` : "Clear"}</strong>
           <small>{retryQueue[0] ? `${retryQueue[0].label} | ${retryQueue[0].status}` : "All local operations synced"}</small>
