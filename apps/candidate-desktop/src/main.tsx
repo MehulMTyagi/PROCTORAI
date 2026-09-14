@@ -25,6 +25,7 @@ import Preflight, { type ReadinessCheck, type ReadinessKey, type CheckStatus } f
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const AI_ENGINE_BASE = import.meta.env.VITE_AI_ENGINE_URL ?? "http://127.0.0.1:8765";
 const TUNNEL_BYPASS_HEADERS = { "bypass-tunnel-reminder": "1" };
+const PHONE_LIKE_CLASSES = new Set(["cell phone", "remote"]);
 
 type User = { id: string; email: string; full_name: string; role: string };
 type Assessment = {
@@ -218,6 +219,7 @@ function App() {
   const flushingRef = useRef(false);
   const autoEventRef = useRef<Record<string, number>>({});
   const audioSignalRef = useRef({ consecutiveLoudSamples: 0, lastSentAt: 0 });
+  const objectSignalRef = useRef({ consecutivePhoneSamples: 0, lastSentAt: 0, analyzing: false });
   const readinessRef = useRef({ consentAccepted, readinessChecks });
   readinessRef.current = { consentAccepted, readinessChecks };
 
@@ -610,49 +612,74 @@ function App() {
 
   async function analyzeObjectSample() {
     if (!attempt || isSubmitted) return;
+    if (objectSignalRef.current.analyzing) return;
     const video = videoRef.current;
     if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
       setObjectMonitor((current) => ({ ...current, status: "waiting", detail: "Waiting for camera frame" }));
       return;
     }
 
+    objectSignalRef.current.analyzing = true;
     const detector = await loadObjectDetector();
-    if (!detector) return;
+    if (!detector) {
+      objectSignalRef.current.analyzing = false;
+      return;
+    }
 
     try {
-      const detections = await detector.detect(video, 8, 0.35) as DetectedObject[];
+      const minScore = 0.18;
+      const detections = await detector.detect(video, 20, minScore) as DetectedObject[];
       const phone = detections
-        .filter((item) => item.class === "cell phone")
+        .filter((item) => PHONE_LIKE_CLASSES.has(item.class))
         .sort((left, right) => right.score - left.score)[0];
       const topDetection = [...detections].sort((left, right) => right.score - left.score)[0];
+      const topLabels = detections
+        .slice(0, 3)
+        .map((item) => `${item.class} ${(item.score * 100).toFixed(0)}%`)
+        .join(", ");
+      objectSignalRef.current.consecutivePhoneSamples = phone
+        ? objectSignalRef.current.consecutivePhoneSamples + 1
+        : 0;
 
       setObjectMonitor({
-        status: phone ? "event" : "scanning",
-        label: phone ? "Phone detected" : topDetection ? topDetection.class : "No phone",
+        status: phone ? "candidate" : "scanning",
+        label: phone ? `${phone.class} candidate` : topDetection ? topDetection.class : "No phone",
         confidence: phone ? phone.score : topDetection?.score ?? null,
-        detail: phone ? "Phone/object event sent to proctor" : "Scanning for phones",
+        detail: phone
+          ? `${objectSignalRef.current.consecutivePhoneSamples}/2 phone-like samples`
+          : topLabels
+            ? `Scanning | ${topLabels}`
+            : "Scanning for phones",
       });
 
-      if (phone) {
+      if (
+        phone &&
+        objectSignalRef.current.consecutivePhoneSamples >= 2 &&
+        Date.now() - objectSignalRef.current.lastSentAt > 12000
+      ) {
+        objectSignalRef.current.lastSentAt = Date.now();
         await sendIntegrityEvent(
           "PHONE_DETECTED",
           {
             source: "object_detector",
             detector: "coco_ssd_lite_mobilenet_v2",
-            object_type: "cell phone",
+            object_type: phone.class,
             confidence: Number(phone.score.toFixed(4)),
             bbox: phone.bbox,
+            min_score: minScore,
+            consecutive_phone_samples: objectSignalRef.current.consecutivePhoneSamples,
             detections: detections.map((item) => ({
               class: item.class,
               score: Number(item.score.toFixed(4)),
               bbox: item.bbox,
             })),
-            review_note: "Browser object detector found a phone-shaped object in the camera frame.",
+            review_note: "Browser object detector found a phone-like object in consecutive camera frames.",
           },
           "HIGH",
           9,
           true,
         );
+        setObjectMonitor((current) => ({ ...current, status: "event", detail: "Phone event sent to proctor" }));
       }
     } catch (nextError) {
       setObjectMonitor({
@@ -673,6 +700,8 @@ function App() {
         8,
         true,
       );
+    } finally {
+      objectSignalRef.current.analyzing = false;
     }
   }
 
@@ -953,6 +982,7 @@ function App() {
       microphoneStreamRef.current?.getTracks().forEach((track) => track.stop());
       microphoneStreamRef.current = null;
       audioSignalRef.current.consecutiveLoudSamples = 0;
+      objectSignalRef.current.consecutivePhoneSamples = 0;
       void audioContext?.close();
     };
   }, [monitoringActive, session?.token, simulateOffline]);
@@ -966,7 +996,7 @@ function App() {
   useEffect(() => {
     if (!monitoringActive) return;
     void analyzeObjectSample();
-    const interval = window.setInterval(() => void analyzeObjectSample(), 4000);
+    const interval = window.setInterval(() => void analyzeObjectSample(), 2000);
     return () => window.clearInterval(interval);
   }, [monitoringActive, attempt?.id]);
 

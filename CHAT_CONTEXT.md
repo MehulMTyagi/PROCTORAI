@@ -84,6 +84,21 @@ Seed users:
     - Candidate portal: `https://candidate-desktop.vercel.app`
   - Live public API smoke through `https://wicked-duck-66.loca.lt` created a `PHONE_DETECTED` event and the proctor event listing returned `evidence_status=READY` with `detector=coco_ssd_lite_mobilenet_v2`.
 
+2026-09-14 phone detection sensitivity fix:
+
+- Candidate phone detection was hardened after live testing showed phones were not being detected reliably.
+- Changes:
+  - lowered COCO-SSD object detection threshold from `0.35` to `0.18`;
+  - scans every 2 seconds instead of every 4 seconds;
+  - treats `remote` as phone-like because COCO-SSD often misclassifies phones as remotes;
+  - requires 2 consecutive phone-like samples before sending `PHONE_DETECTED` to reduce accidental false positives;
+  - shows top detector labels/scores in the candidate object monitor for debugging.
+- Verification:
+  - `npm run build:candidate` -> passed
+  - `python -m pytest services/api/tests/test_events.py -q` -> `9 passed`
+  - Restarted API LocalTunnel on `https://wicked-duck-66.loca.lt` after it returned `503`.
+  - Redeployed the candidate production alias: `https://candidate-desktop.vercel.app`.
+
 2026-09-14 automatic integrity proof for proctor review:
 
 - Candidate automatic integrity events now attach a proof bundle in event metadata and set `evidence_status` to `READY`.
