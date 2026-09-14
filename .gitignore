@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Node / web apps
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# Tauri / Rust
+target/
+src-tauri/gen/
+
+# Local config and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data
+data/
+output/
+*.log
+.playwright-cli/
+
+# Evidence and model binaries
+*.mp4
+*.webm
+*.wav
+*.onnx
+*.pt
+*.pth

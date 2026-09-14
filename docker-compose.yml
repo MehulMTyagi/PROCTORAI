@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: proctorai-postgres
+    environment:
+      POSTGRES_DB: proctorai
+      POSTGRES_USER: proctorai
+      POSTGRES_PASSWORD: proctorai
+    ports:
+      - "5432:5432"
+    volumes:
+      - proctorai-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proctorai -d proctorai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  proctorai-postgres-data:

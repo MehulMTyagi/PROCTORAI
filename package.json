@@ -1,0 +1,16 @@
+{
+  "name": "proctorai",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace @proctorai/web-portal run dev",
+    "dev:candidate": "npm --workspace @proctorai/candidate-desktop run dev",
+    "build:web": "npm --workspace @proctorai/web-portal run build",
+    "build:candidate": "npm --workspace @proctorai/candidate-desktop run build",
+    "lint:web": "npm --workspace @proctorai/web-portal run lint",
+    "lint:candidate": "npm --workspace @proctorai/candidate-desktop run lint"
+  }
+}

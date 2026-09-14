@@ -1,0 +1,12 @@
+node_modules
+dist
+src-tauri/target
+src-tauri/gen
+src-tauri/icons
+src-tauri/src
+src-tauri/capabilities
+src-tauri/Cargo.lock
+src-tauri/Cargo.toml
+src-tauri/build.rs
+src-tauri/tauri.conf.json
+tsconfig.tsbuildinfo
