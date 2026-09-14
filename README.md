@@ -1,5 +1,5 @@
 # ProctorAI
-
+f
 ProctorAI is a BCA Semester V capstone project for an AI-native multimodal proctoring and assessment-integrity monitoring system for remote assessments and interviews.
 
 The system is designed around a privacy-aware workflow: the candidate app performs AI monitoring primarily on the candidate's Windows laptop, keeps normal camera/audio data in a bounded rolling buffer, and uploads only short evidence clips or logs when a potential integrity event is detected. A human proctor reviews each event. The system does not make automatic misconduct decisions.
