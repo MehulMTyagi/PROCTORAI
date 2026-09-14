@@ -809,7 +809,7 @@ function App() {
       window.removeEventListener("blur", handleFocusLost);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [monitoringActive, session?.token, simulateOffline]);
+  }, [monitoringActive, sidecarReady, session?.token, simulateOffline]);
 
   useEffect(() => {
     if (!monitoringActive) return;
@@ -846,7 +846,7 @@ function App() {
   }, [monitoringActive, heartbeatGapNotified, lastHeartbeatAckAt, session?.token, simulateOffline]);
 
   useEffect(() => {
-    if (!monitoringActive || !sidecarReady || !navigator.mediaDevices?.getUserMedia) {
+    if (!monitoringActive || !navigator.mediaDevices?.getUserMedia) {
       return;
     }
 
@@ -877,7 +877,11 @@ function App() {
           track.onended = () => notifyCameraDisabled("camera_track_ended");
           track.onmute = () => notifyCameraDisabled("camera_track_muted");
         });
-        setFaceMonitor((current) => ({ ...current, status: "camera", detail: "Camera sampler active" }));
+        setFaceMonitor((current) => ({
+          ...current,
+          status: sidecarReady ? "camera" : "camera-only",
+          detail: sidecarReady ? "Camera sampler active" : "Camera active; face sidecar pending",
+        }));
       })
       .catch(() => {
         setFaceMonitor((current) => ({ ...current, status: "warning", detail: "Camera stream unavailable" }));
@@ -893,7 +897,7 @@ function App() {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     };
-  }, [monitoringActive, sidecarReady, session?.token, simulateOffline]);
+  }, [monitoringActive, session?.token, simulateOffline]);
 
   useEffect(() => {
     if (!monitoringActive || !navigator.mediaDevices?.getUserMedia) {
@@ -1224,7 +1228,7 @@ function App() {
         <div className="status-tile">
           <ScanFace size={22} aria-hidden="true" />
           <span>Face AI</span>
-          <strong>{sidecarReady ? faceMonitor.status : "Pending"}</strong>
+          <strong>{faceMonitor.status}</strong>
         </div>
       </section>}
 

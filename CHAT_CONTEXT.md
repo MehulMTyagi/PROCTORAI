@@ -99,6 +99,25 @@ Seed users:
   - Restarted API LocalTunnel on `https://wicked-duck-66.loca.lt` after it returned `503`.
   - Redeployed the candidate production alias: `https://candidate-desktop.vercel.app`.
 
+2026-09-14 proctoring visibility regression fix:
+
+- User reported that "all the proctoring is gone" after the phone-detection iteration.
+- Root causes found:
+  - The public API LocalTunnel was again returning `503`, which breaks deployed portal authentication, assessment loading, heartbeats, and event delivery.
+  - Candidate camera/object monitoring was coupled to `sidecarReady`, so if the face sidecar was pending or flaky the camera stream and browser phone detector could fail to start.
+- Fix:
+  - Restarted the API LocalTunnel; LocalTunnel could not reclaim `https://wicked-duck-66.loca.lt`, so the current API tunnel is `https://friendly-owl-32.loca.lt`.
+  - Candidate camera stream now starts whenever an attempt is active and browser media APIs are available; face analysis still requires the sidecar, but camera-disabled events and object/phone detection no longer depend on `sidecarReady`.
+  - Candidate status grid now shows the real face/camera monitor state instead of forcing `Pending` whenever the sidecar is unavailable.
+- Verification:
+  - `npm run build:candidate` -> passed
+  - `python -m pytest services/api/tests/test_events.py -q` -> `9 passed`
+  - API tunnel health check returned `{"status":"ok","service":"ProctorAI API","version":"0.1.0"}` for `https://friendly-owl-32.loca.lt`.
+  - Redeployed both production aliases against the new API tunnel:
+    - Web portal: `https://web-portal-six-kappa.vercel.app`
+    - Candidate portal: `https://candidate-desktop.vercel.app`
+  - Public API smoke through `https://friendly-owl-32.loca.lt` created an `APP_FOCUS_LOST` event and the proctor event listing returned `evidence_status=READY`.
+
 2026-09-14 automatic integrity proof for proctor review:
 
 - Candidate automatic integrity events now attach a proof bundle in event metadata and set `evidence_status` to `READY`.
@@ -135,7 +154,7 @@ Seed users:
   - `https://candidate-desktop.vercel.app`
   - Deployment URL: `https://candidate-desktop-7bupdkdpw-mehul-tyagis-projects.vercel.app`
 - The deployed portals are currently wired to temporary public LocalTunnel URLs:
-  - ProctorAI API tunnel: `https://wicked-duck-66.loca.lt`
+  - ProctorAI API tunnel: `https://friendly-owl-32.loca.lt`
   - AI sidecar tunnel: `https://tricky-moose-59.loca.lt`
 - Local services backing those tunnels must stay running on this machine:
   - API: `http://127.0.0.1:8010`
