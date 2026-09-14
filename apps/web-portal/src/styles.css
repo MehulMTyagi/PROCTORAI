@@ -123,6 +123,15 @@ nav {
   gap: 20px;
 }
 
+.assessment-picker {
+  max-width: 420px;
+  margin-top: 14px;
+}
+
+.assessment-picker select {
+  min-height: 40px;
+}
+
 .eyebrow,
 .mini-label {
   margin: 0 0 6px;

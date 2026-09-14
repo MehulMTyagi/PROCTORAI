@@ -179,6 +179,54 @@ def test_candidate_event_with_proof_is_visible_to_proctor(
     assert event["metadata"]["proof"]["camera_snapshot"]["sha256_hash"] == "a" * 64
 
 
+def test_phone_detected_event_is_visible_to_proctor(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    assessment, attempt = _create_attempt(db_session)
+    candidate_token = _token(client, "candidate@example.com")
+
+    create_response = client.post(
+        f"/attempts/{attempt.id}/events",
+        headers={"Authorization": f"Bearer {candidate_token}"},
+        json={
+            "event_type": "PHONE_DETECTED",
+            "severity": "HIGH",
+            "confidence": 0.91,
+            "priority_score": 9,
+            "evidence_status": "READY",
+            "metadata": {
+                "source": "object_detector",
+                "detector": "coco_ssd_lite_mobilenet_v2",
+                "object_type": "cell phone",
+                "proof": {
+                    "kind": "CAMERA_SNAPSHOT",
+                    "review_note": "Browser object detector found a phone-shaped object in the camera frame.",
+                    "camera_snapshot": {
+                        "data_url": "data:image/jpeg;base64,phone-proof",
+                        "sha256_hash": "b" * 64,
+                    },
+                },
+            },
+        },
+    )
+
+    assert create_response.status_code == 201
+    assert create_response.json()["event_type"] == "PHONE_DETECTED"
+
+    proctor_token = _token(client, "proctor@example.com")
+    list_response = client.get(
+        f"/proctor/assessments/{assessment.id}/events",
+        headers={"Authorization": f"Bearer {proctor_token}"},
+    )
+
+    assert list_response.status_code == 200
+    event = list_response.json()[0]
+    assert event["event_type"] == "PHONE_DETECTED"
+    assert event["metadata"]["detector"] == "coco_ssd_lite_mobilenet_v2"
+    assert event["metadata"]["proof"]["camera_snapshot"]["sha256_hash"] == "b" * 64
+
+
 def test_non_candidate_cannot_create_attempt_event(
     client: TestClient,
     db_session: Session,

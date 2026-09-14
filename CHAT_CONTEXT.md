@@ -69,14 +69,20 @@ Seed users:
   - `MICROPHONE_DISABLED` when the microphone stream cannot start, is muted, or ends/disconnects.
   - `BACKGROUND_SPEECH` when the browser microphone monitor detects sustained audio/noise above threshold.
   - `AI_ENGINE_INTERRUPTED` when sidecar frame analysis fails during monitoring.
-  - `PHONE_DETECTED` is wired through the live event/proof path with a candidate-side demo control; true automatic phone/object recognition still needs a dedicated object-detection model.
+  - `PHONE_DETECTED` when the browser-side COCO-SSD object detector finds a `cell phone` class in the camera frame.
 - Background voice/noise detection is currently a Web Audio RMS-level heuristic for MVP review, not speaker identification or transcription.
+- Phone detection uses lazy-loaded TensorFlow.js + COCO-SSD (`lite_mobilenet_v2`) in the candidate browser. It sends the event immediately with the current camera proof frame, score, bounding box, and detector metadata.
 - Proctor rules JSON now includes `BACKGROUND_SPEECH`, `PHONE_DETECTED`, and `AI_ENGINE_INTERRUPTED`.
 - Proctor dashboard shows `polling` as a healthy fallback state when WebSocket is unavailable but the 5-second event poll is still loading events.
+- Examiner-created assessments are now automatically assigned to the default seeded candidate and proctor, and the proctor dashboard includes an assessment queue selector so events from newly created tests are visible.
 - Verification:
-  - `python -m pytest services/api/tests/test_events.py -q` -> `8 passed`
+  - `python -m pytest services/api/tests/test_events.py -q` -> `9 passed`
   - `npm run build:candidate` -> passed
   - `npm run build:web` -> passed
+  - Redeployed production Vercel aliases:
+    - Web portal: `https://web-portal-six-kappa.vercel.app`
+    - Candidate portal: `https://candidate-desktop.vercel.app`
+  - Live public API smoke through `https://wicked-duck-66.loca.lt` created a `PHONE_DETECTED` event and the proctor event listing returned `evidence_status=READY` with `detector=coco_ssd_lite_mobilenet_v2`.
 
 2026-09-14 automatic integrity proof for proctor review:
 

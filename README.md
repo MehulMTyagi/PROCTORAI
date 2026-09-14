@@ -152,7 +152,7 @@ Week 4 verification:
 - Candidate Tauri scaffold passes `cargo check`.
 - Browser smoke test confirms preflight gating, heartbeat sync, offline answer/event queueing, retry sync recovery, submission, and proctor visibility for high-priority events.
 
-Week 5 is complete: the local AI sidecar, OpenCV face counting, debounced `FACE_ABSENT` and `MULTIPLE_PERSONS` event candidates, candidate sidecar readiness, low-rate frame sampling, deterministic face-event demos, live camera/microphone integrity events, and proctor visibility for AI-derived events are in place.
+Week 5 is complete: the local AI sidecar, OpenCV face counting, debounced `FACE_ABSENT` and `MULTIPLE_PERSONS` event candidates, candidate sidecar readiness, low-rate frame sampling, deterministic face-event demos, browser phone detection, live camera/microphone integrity events, and proctor visibility for AI-derived events are in place.
 
 Week 5 verification:
 
@@ -187,11 +187,11 @@ The requirement checks are candidate-side readiness gates. The backend still rem
 
 ## Proctor Evidence Review
 
-Candidate integrity signals are sent to the proctor queue automatically during an active attempt. Current automatic signals include fullscreen exits, focus loss, heartbeat gaps, face absence, multiple-person detections, camera disabled/device-loss events, microphone disabled/device-loss events, sustained background audio/noise signals, and AI sidecar interruption events.
+Candidate integrity signals are sent to the proctor queue automatically during an active attempt. Current automatic signals include fullscreen exits, focus loss, heartbeat gaps, face absence, multiple-person detections, phone detections, camera disabled/device-loss events, microphone disabled/device-loss events, sustained background audio/noise signals, and AI/object sidecar interruption events.
 
 Each new event includes review proof in the event metadata and is marked `READY` when proof is attached. Camera-based signals include a local snapshot, hash, timestamp, model/sample details, and session state. Browser/session signals include fullscreen and visibility context, and use the current camera sampler frame when one is available. The proctor dashboard renders this proof beside each event for human review.
 
-`PHONE_DETECTED` is wired through the live integrity-event and proof path with a candidate-side demo control. Automatic phone/object recognition remains a model-integration task; the current browser microphone background-voice/noise detection is an audio-level heuristic, not speech transcription or speaker identification.
+`PHONE_DETECTED` uses lazy-loaded TensorFlow.js + COCO-SSD (`lite_mobilenet_v2`) in the candidate browser to detect the `cell phone` class from the live camera frame. The current browser microphone background-voice/noise detection is an audio-level heuristic, not speech transcription or speaker identification.
 
 This proof path is intended for the live MVP demo. The next production hardening step is the Week 6 evidence-file pipeline with protected media storage, short clip generation, playback controls, retention, and cleanup.
 

@@ -90,6 +90,8 @@ type AiFrameResponse = {
   events: AiEventCandidate[];
   model: AiModelInfo;
 };
+type ObjectDetectionModel = import("@tensorflow-models/coco-ssd").ObjectDetection;
+type DetectedObject = import("@tensorflow-models/coco-ssd").DetectedObject;
 type Session = { token: string; user: User };
 type PendingOperation = {
   id: string;
@@ -197,6 +199,12 @@ function App() {
     samplesAnalyzed: 0,
     detail: "Waiting for sidecar",
   });
+  const [objectMonitor, setObjectMonitor] = useState({
+    status: "idle",
+    label: "No object sample",
+    confidence: null as number | null,
+    detail: "Phone detector pending",
+  });
   const [retryQueue, setRetryQueue] = useState<PendingOperation[]>([]);
   const [simulateOffline, setSimulateOffline] = useState(false);
   const [status, setStatus] = useState("connecting");
@@ -205,6 +213,8 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
+  const objectDetectorRef = useRef<ObjectDetectionModel | null>(null);
+  const objectDetectorLoadingRef = useRef(false);
   const flushingRef = useRef(false);
   const autoEventRef = useRef<Record<string, number>>({});
   const audioSignalRef = useRef({ consecutiveLoudSamples: 0, lastSentAt: 0 });
@@ -558,6 +568,114 @@ function App() {
     }
   }
 
+  async function loadObjectDetector() {
+    if (objectDetectorRef.current) return objectDetectorRef.current;
+    if (objectDetectorLoadingRef.current) return null;
+
+    objectDetectorLoadingRef.current = true;
+    setObjectMonitor((current) => ({ ...current, status: "loading", detail: "Loading phone detector" }));
+    try {
+      const [cocoSsd, tf] = await Promise.all([
+        import("@tensorflow-models/coco-ssd"),
+        import("@tensorflow/tfjs"),
+      ]);
+      await tf.ready();
+      objectDetectorRef.current = await cocoSsd.load({ base: "lite_mobilenet_v2" });
+      setObjectMonitor((current) => ({ ...current, status: "ready", detail: "Phone detector active" }));
+      return objectDetectorRef.current;
+    } catch (nextError) {
+      setObjectMonitor({
+        status: "error",
+        label: "Detector error",
+        confidence: null,
+        detail: nextError instanceof Error ? nextError.message : "Phone detector failed to load",
+      });
+      void sendIntegrityEvent(
+        "AI_ENGINE_INTERRUPTED",
+        {
+          source: "object_detector",
+          detector: "coco_ssd_lite_mobilenet_v2",
+          reason: "object_detector_load_failed",
+          error: nextError instanceof Error ? nextError.message : "Phone detector failed to load",
+        },
+        "HIGH",
+        8,
+        true,
+      );
+      return null;
+    } finally {
+      objectDetectorLoadingRef.current = false;
+    }
+  }
+
+  async function analyzeObjectSample() {
+    if (!attempt || isSubmitted) return;
+    const video = videoRef.current;
+    if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      setObjectMonitor((current) => ({ ...current, status: "waiting", detail: "Waiting for camera frame" }));
+      return;
+    }
+
+    const detector = await loadObjectDetector();
+    if (!detector) return;
+
+    try {
+      const detections = await detector.detect(video, 8, 0.35) as DetectedObject[];
+      const phone = detections
+        .filter((item) => item.class === "cell phone")
+        .sort((left, right) => right.score - left.score)[0];
+      const topDetection = [...detections].sort((left, right) => right.score - left.score)[0];
+
+      setObjectMonitor({
+        status: phone ? "event" : "scanning",
+        label: phone ? "Phone detected" : topDetection ? topDetection.class : "No phone",
+        confidence: phone ? phone.score : topDetection?.score ?? null,
+        detail: phone ? "Phone/object event sent to proctor" : "Scanning for phones",
+      });
+
+      if (phone) {
+        await sendIntegrityEvent(
+          "PHONE_DETECTED",
+          {
+            source: "object_detector",
+            detector: "coco_ssd_lite_mobilenet_v2",
+            object_type: "cell phone",
+            confidence: Number(phone.score.toFixed(4)),
+            bbox: phone.bbox,
+            detections: detections.map((item) => ({
+              class: item.class,
+              score: Number(item.score.toFixed(4)),
+              bbox: item.bbox,
+            })),
+            review_note: "Browser object detector found a phone-shaped object in the camera frame.",
+          },
+          "HIGH",
+          9,
+          true,
+        );
+      }
+    } catch (nextError) {
+      setObjectMonitor({
+        status: "error",
+        label: "Detector error",
+        confidence: null,
+        detail: nextError instanceof Error ? nextError.message : "Phone detection failed",
+      });
+      void sendIntegrityEvent(
+        "AI_ENGINE_INTERRUPTED",
+        {
+          source: "object_detector",
+          detector: "coco_ssd_lite_mobilenet_v2",
+          reason: "object_detection_failed",
+          error: nextError instanceof Error ? nextError.message : "Phone detection failed",
+        },
+        "HIGH",
+        8,
+        true,
+      );
+    }
+  }
+
   function sendPhoneObjectEvent() {
     void sendIntegrityEvent(
       "PHONE_DETECTED",
@@ -844,6 +962,13 @@ function App() {
     const interval = window.setInterval(() => void analyzeFaceSample(), 3000);
     return () => window.clearInterval(interval);
   }, [monitoringActive, sidecarReady, attempt?.id]);
+
+  useEffect(() => {
+    if (!monitoringActive) return;
+    void analyzeObjectSample();
+    const interval = window.setInterval(() => void analyzeObjectSample(), 4000);
+    return () => window.clearInterval(interval);
+  }, [monitoringActive, attempt?.id]);
 
   useEffect(() => {
     if (retryQueue.length > 0 && !simulateOffline) {
@@ -1173,6 +1298,13 @@ function App() {
               Background Voice
             </button>
           </div>
+          <span>Object Monitor</span>
+          <strong>{objectMonitor.label}</strong>
+          <small>
+            {objectMonitor.confidence === null
+              ? objectMonitor.detail
+              : `${objectMonitor.detail} | ${(objectMonitor.confidence * 100).toFixed(0)}%`}
+          </small>
           <span>Last Event</span>
           <strong>{lastEvent ? lastEvent.event_type.replaceAll("_", " ") : "None"}</strong>
           <small>{lastEvent ? `${lastEvent.status} | Priority ${lastEvent.priority_score} | Evidence ${lastEvent.evidence_status}` : "Ready"}</small>

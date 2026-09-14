@@ -185,6 +185,32 @@ function App() {
     );
   }
 
+  async function selectAssessment(assessmentId: string) {
+    await loadAssessment(assessmentId);
+    if (mode === "PROCTOR") await loadEvents(assessmentId);
+  }
+
+  async function assignDefaultReviewTeam(assessmentId: string) {
+    const defaultCandidate = users.find((user) => user.role === "CANDIDATE");
+    const defaultProctor = users.find((user) => user.role === "PROCTOR");
+    await Promise.all([
+      defaultCandidate
+        ? api<void>(`/assessments/${assessmentId}/candidates`, {
+            method: "POST",
+            headers: authHeaders,
+            body: JSON.stringify({ user_id: defaultCandidate.id }),
+          })
+        : Promise.resolve(),
+      defaultProctor
+        ? api<void>(`/assessments/${assessmentId}/proctors`, {
+            method: "POST",
+            headers: authHeaders,
+            body: JSON.stringify({ user_id: defaultProctor.id }),
+          })
+        : Promise.resolve(),
+    ]);
+  }
+
   async function loadMode(nextMode: AccountMode = mode) {
     setStatus("loading");
     setError(null);
@@ -257,9 +283,10 @@ function App() {
         headers: authHeaders,
         body: JSON.stringify(assessmentForm),
       });
+      await assignDefaultReviewTeam(created.id);
       setAssessments((current) => [created, ...current]);
       await loadAssessment(created.id);
-      setLastAction(`Created assessment "${created.title}".`);
+      setLastAction(`Created assessment "${created.title}" and connected it to the default candidate and proctor.`);
       setStatus("ready");
     } catch (nextError) {
       setStatus("error");
@@ -370,6 +397,21 @@ function App() {
           <div>
             <p className="eyebrow">{mode === "EXAMINER" ? "Examiner Workspace" : "Proctor Dashboard"}</p>
             <h1>{mode === "EXAMINER" ? "Assessment Setup" : selected?.title ?? session?.bootstrap.assessment_title ?? "Connecting"}</h1>
+            {mode === "PROCTOR" && assessments.length > 0 ? (
+              <label className="assessment-picker">
+                Assessment queue
+                <select
+                  value={selected?.id ?? ""}
+                  onChange={(event) => void selectAssessment(event.target.value)}
+                >
+                  {assessments.map((assessment) => (
+                    <option value={assessment.id} key={assessment.id}>
+                      {assessment.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
           </div>
           <div className={`status-pill ${mode === "PROCTOR" ? socketState : status}`}>
             {mode === "PROCTOR" ? <Radio size={16} /> : <CheckCircle2 size={16} />}
@@ -452,7 +494,7 @@ function App() {
                   <button
                     className={selected?.id === assessment.id ? "assessment-row active" : "assessment-row"}
                     key={assessment.id}
-                    onClick={() => loadAssessment(assessment.id)}
+                    onClick={() => selectAssessment(assessment.id)}
                   >
                     <span>{assessment.title}</span>
                     <strong>{assessment.status}</strong>
