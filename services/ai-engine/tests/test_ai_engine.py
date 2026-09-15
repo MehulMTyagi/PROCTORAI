@@ -21,6 +21,7 @@ def test_health_reports_local_face_model() -> None:
     assert payload["status"] == "ok"
     assert payload["service"] == "ProctorAI AI Engine"
     assert payload["model"]["detector"] == "haarcascade_frontalface_default"
+    assert payload["object_model"]["detector"] == "ultralytics-yolo"
 
 
 def test_face_absent_event_is_debounced_until_threshold() -> None:
@@ -97,3 +98,52 @@ def test_blank_frame_data_url_counts_zero_faces() -> None:
     assert response.status_code == 200
     assert response.json()["face_count"] == 0
     assert response.json()["events"][0]["event_type"] == "FACE_ABSENT"
+
+
+def test_yolo_object_endpoint_reports_phone_event() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/detect-objects",
+        json={
+            "session_id": "attempt-5",
+            "observed_objects": [
+                {
+                    "class_name": "cell phone",
+                    "confidence": 0.87,
+                    "bbox": [10, 12, 80, 120],
+                    "phone_like": True,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["phone_like_objects"][0]["class_name"] == "cell phone"
+    assert payload["events"][0]["event_type"] == "PHONE_DETECTED"
+    assert payload["events"][0]["metadata"]["detector"] == "ultralytics-yolo"
+
+
+def test_yolo_object_endpoint_ignores_non_phone_objects() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/detect-objects",
+        json={
+            "session_id": "attempt-6",
+            "observed_objects": [
+                {
+                    "class_name": "book",
+                    "confidence": 0.92,
+                    "bbox": [4, 6, 40, 50],
+                    "phone_like": False,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["phone_like_objects"] == []
+    assert payload["events"] == []

@@ -25,7 +25,6 @@ import Preflight, { type ReadinessCheck, type ReadinessKey, type CheckStatus } f
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const AI_ENGINE_BASE = import.meta.env.VITE_AI_ENGINE_URL ?? "http://127.0.0.1:8765";
 const TUNNEL_BYPASS_HEADERS = { "bypass-tunnel-reminder": "1" };
-const PHONE_LIKE_CLASSES = new Set(["cell phone", "remote"]);
 
 type User = { id: string; email: string; full_name: string; role: string };
 type Assessment = {
@@ -72,6 +71,7 @@ type AiModelInfo = {
   version: string;
   detector: string;
   cascade_path?: string | null;
+  model_path?: string | null;
 };
 type AiEventCandidate = {
   event_type: "FACE_ABSENT" | "MULTIPLE_PERSONS";
@@ -91,8 +91,25 @@ type AiFrameResponse = {
   events: AiEventCandidate[];
   model: AiModelInfo;
 };
-type ObjectDetectionModel = import("@tensorflow-models/coco-ssd").ObjectDetection;
-type DetectedObject = import("@tensorflow-models/coco-ssd").DetectedObject;
+type YoloDetectedObject = {
+  class_name: string;
+  confidence: number;
+  bbox: number[];
+  phone_like: boolean;
+};
+type YoloObjectEventCandidate = {
+  event_type: "PHONE_DETECTED";
+  severity: "HIGH";
+  confidence: number;
+  priority_score: number;
+  metadata: Record<string, unknown>;
+};
+type YoloObjectResponse = {
+  objects: YoloDetectedObject[];
+  phone_like_objects: YoloDetectedObject[];
+  events: YoloObjectEventCandidate[];
+  model: AiModelInfo;
+};
 type Session = { token: string; user: User };
 type PendingOperation = {
   id: string;
@@ -214,8 +231,6 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
-  const objectDetectorRef = useRef<ObjectDetectionModel | null>(null);
-  const objectDetectorLoadingRef = useRef(false);
   const flushingRef = useRef(false);
   const autoEventRef = useRef<Record<string, number>>({});
   const audioSignalRef = useRef({ consecutiveLoudSamples: 0, lastSentAt: 0 });
@@ -570,72 +585,39 @@ function App() {
     }
   }
 
-  async function loadObjectDetector() {
-    if (objectDetectorRef.current) return objectDetectorRef.current;
-    if (objectDetectorLoadingRef.current) return null;
-
-    objectDetectorLoadingRef.current = true;
-    setObjectMonitor((current) => ({ ...current, status: "loading", detail: "Loading phone detector" }));
-    try {
-      const [cocoSsd, tf] = await Promise.all([
-        import("@tensorflow-models/coco-ssd"),
-        import("@tensorflow/tfjs"),
-      ]);
-      await tf.ready();
-      objectDetectorRef.current = await cocoSsd.load({ base: "lite_mobilenet_v2" });
-      setObjectMonitor((current) => ({ ...current, status: "ready", detail: "Phone detector active" }));
-      return objectDetectorRef.current;
-    } catch (nextError) {
-      setObjectMonitor({
-        status: "error",
-        label: "Detector error",
-        confidence: null,
-        detail: nextError instanceof Error ? nextError.message : "Phone detector failed to load",
-      });
-      void sendIntegrityEvent(
-        "AI_ENGINE_INTERRUPTED",
-        {
-          source: "object_detector",
-          detector: "coco_ssd_lite_mobilenet_v2",
-          reason: "object_detector_load_failed",
-          error: nextError instanceof Error ? nextError.message : "Phone detector failed to load",
-        },
-        "HIGH",
-        8,
-        true,
-      );
-      return null;
-    } finally {
-      objectDetectorLoadingRef.current = false;
-    }
-  }
-
   async function analyzeObjectSample() {
     if (!attempt || isSubmitted) return;
     if (objectSignalRef.current.analyzing) return;
-    const video = videoRef.current;
-    if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+    const frameDataUrl = captureFrameDataUrl();
+    if (!frameDataUrl) {
       setObjectMonitor((current) => ({ ...current, status: "waiting", detail: "Waiting for camera frame" }));
       return;
     }
 
     objectSignalRef.current.analyzing = true;
-    const detector = await loadObjectDetector();
-    if (!detector) {
-      objectSignalRef.current.analyzing = false;
-      return;
-    }
 
     try {
-      const minScore = 0.18;
-      const detections = await detector.detect(video, 20, minScore) as DetectedObject[];
-      const phone = detections
-        .filter((item) => PHONE_LIKE_CLASSES.has(item.class))
-        .sort((left, right) => right.score - left.score)[0];
-      const topDetection = [...detections].sort((left, right) => right.score - left.score)[0];
-      const topLabels = detections
+      const response = await fetch(`${AI_ENGINE_BASE}/detect-objects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...TUNNEL_BYPASS_HEADERS },
+        body: JSON.stringify({
+          session_id: attempt.id,
+          frame_data_url: frameDataUrl,
+          config: {
+            min_confidence: 0.12,
+            max_detections: 20,
+            phone_like_classes: ["cell phone", "remote"],
+          },
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+
+      const analysis = await response.json() as YoloObjectResponse;
+      const phone = analysis.phone_like_objects.sort((left, right) => right.confidence - left.confidence)[0];
+      const topDetection = [...analysis.objects].sort((left, right) => right.confidence - left.confidence)[0];
+      const topLabels = analysis.objects
         .slice(0, 3)
-        .map((item) => `${item.class} ${(item.score * 100).toFixed(0)}%`)
+        .map((item) => `${item.class_name} ${(item.confidence * 100).toFixed(0)}%`)
         .join(", ");
       objectSignalRef.current.consecutivePhoneSamples = phone
         ? objectSignalRef.current.consecutivePhoneSamples + 1
@@ -643,13 +625,13 @@ function App() {
 
       setObjectMonitor({
         status: phone ? "candidate" : "scanning",
-        label: phone ? `${phone.class} candidate` : topDetection ? topDetection.class : "No phone",
-        confidence: phone ? phone.score : topDetection?.score ?? null,
+        label: phone ? `${phone.class_name} candidate` : topDetection ? topDetection.class_name : "No phone",
+        confidence: phone ? phone.confidence : topDetection?.confidence ?? null,
         detail: phone
           ? `${objectSignalRef.current.consecutivePhoneSamples}/2 phone-like samples`
           : topLabels
-            ? `Scanning | ${topLabels}`
-            : "Scanning for phones",
+            ? `YOLO scanning | ${topLabels}`
+            : `YOLO scanning with ${analysis.model.model_path ?? analysis.model.detector}`,
       });
 
       if (
@@ -661,23 +643,26 @@ function App() {
         await sendIntegrityEvent(
           "PHONE_DETECTED",
           {
+            ...analysis.events[0]?.metadata,
             source: "object_detector",
-            detector: "coco_ssd_lite_mobilenet_v2",
-            object_type: phone.class,
-            confidence: Number(phone.score.toFixed(4)),
+            detector: analysis.model.detector,
+            model: analysis.model,
+            object_type: phone.class_name,
+            confidence: Number(phone.confidence.toFixed(4)),
             bbox: phone.bbox,
-            min_score: minScore,
+            min_score: 0.12,
             consecutive_phone_samples: objectSignalRef.current.consecutivePhoneSamples,
-            detections: detections.map((item) => ({
-              class: item.class,
-              score: Number(item.score.toFixed(4)),
+            detections: analysis.objects.map((item) => ({
+              class: item.class_name,
+              score: Number(item.confidence.toFixed(4)),
               bbox: item.bbox,
             })),
-            review_note: "Browser object detector found a phone-like object in consecutive camera frames.",
+            review_note: "YOLO object detector found a phone-like object in consecutive camera frames.",
           },
           "HIGH",
           9,
           true,
+          frameDataUrl,
         );
         setObjectMonitor((current) => ({ ...current, status: "event", detail: "Phone event sent to proctor" }));
       }
@@ -692,7 +677,7 @@ function App() {
         "AI_ENGINE_INTERRUPTED",
         {
           source: "object_detector",
-          detector: "coco_ssd_lite_mobilenet_v2",
+          detector: "ultralytics-yolo",
           reason: "object_detection_failed",
           error: nextError instanceof Error ? nextError.message : "Phone detection failed",
         },

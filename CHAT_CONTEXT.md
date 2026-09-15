@@ -62,6 +62,29 @@ Seed users:
 
 ## Latest Stabilization Pass
 
+2026-09-15 YOLO phone detection migration:
+
+- User requested YOLO after COCO-SSD browser detection was too weak for phone detection.
+- Implemented local AI sidecar object detection with Ultralytics YOLO:
+  - Added `YoloObjectDetector` in `services/ai-engine/app/vision.py`.
+  - Added `POST /detect-objects` with `DetectObjectsRequest` / `DetectObjectsResponse`.
+  - Default model path is `yolov8n.pt`; it can be overridden with `YOLO_MODEL_PATH`.
+  - `PHONE_DETECTED` candidates are returned for phone-like classes (`cell phone`, `remote` by default).
+- Candidate portal now sends camera snapshots to the local AI sidecar `/detect-objects` endpoint instead of loading TensorFlow.js/COCO-SSD in the browser.
+- Removed TensorFlow.js and COCO-SSD dependencies from the candidate package.
+- Restarted the local AI sidecar on `http://127.0.0.1:8765`; YOLO warmed up successfully and reported model version `8.4.30`.
+- Current public tunnels:
+  - API: `https://friendly-owl-32.loca.lt`
+  - AI sidecar: `https://tricky-moose-59.loca.lt`
+- Verification:
+  - `python -m pytest services/ai-engine/tests -q` -> `7 passed`
+  - `python -m pytest services/api/tests/test_events.py -q` -> `9 passed`
+  - `npm run build:candidate` -> passed
+  - `npm run build:web` -> passed
+  - Public AI tunnel smoke: `POST https://tricky-moose-59.loca.lt/detect-objects` returned a `PHONE_DETECTED` candidate with `detector=ultralytics-yolo`.
+  - Public API smoke: created a `PHONE_DETECTED` integrity event and proctor listing returned `evidence_status=READY` with `detector=ultralytics-yolo`.
+  - Redeployed candidate production alias: `https://candidate-desktop.vercel.app`.
+
 2026-09-14 real-time camera/microphone integrity events:
 
 - Candidate monitoring now emits additional integrity events during the active attempt, before submission:
@@ -69,9 +92,9 @@ Seed users:
   - `MICROPHONE_DISABLED` when the microphone stream cannot start, is muted, or ends/disconnects.
   - `BACKGROUND_SPEECH` when the browser microphone monitor detects sustained audio/noise above threshold.
   - `AI_ENGINE_INTERRUPTED` when sidecar frame analysis fails during monitoring.
-  - `PHONE_DETECTED` when the browser-side COCO-SSD object detector finds a `cell phone` class in the camera frame.
+  - `PHONE_DETECTED` when the YOLO object detector finds a phone-like object in the camera frame.
 - Background voice/noise detection is currently a Web Audio RMS-level heuristic for MVP review, not speaker identification or transcription.
-- Phone detection uses lazy-loaded TensorFlow.js + COCO-SSD (`lite_mobilenet_v2`) in the candidate browser. It sends the event immediately with the current camera proof frame, score, bounding box, and detector metadata.
+- Phone detection now uses the local YOLO sidecar path. It sends the event immediately with the current camera proof frame, score, bounding box, and detector metadata.
 - Proctor rules JSON now includes `BACKGROUND_SPEECH`, `PHONE_DETECTED`, and `AI_ENGINE_INTERRUPTED`.
 - Proctor dashboard shows `polling` as a healthy fallback state when WebSocket is unavailable but the 5-second event poll is still loading events.
 - Examiner-created assessments are now automatically assigned to the default seeded candidate and proctor, and the proctor dashboard includes an assessment queue selector so events from newly created tests are visible.
@@ -86,6 +109,7 @@ Seed users:
 
 2026-09-14 phone detection sensitivity fix:
 
+- Superseded on 2026-09-15 by the YOLO sidecar implementation above.
 - Candidate phone detection was hardened after live testing showed phones were not being detected reliably.
 - Changes:
   - lowered COCO-SSD object detection threshold from `0.35` to `0.18`;
