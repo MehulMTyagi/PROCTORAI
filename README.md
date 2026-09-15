@@ -204,8 +204,8 @@ Current Vercel demo URLs:
 
 These deployments are currently wired to temporary LocalTunnel URLs for the local ProctorAI API and AI sidecar:
 
-- API tunnel: `https://wicked-duck-66.loca.lt`
-- AI sidecar tunnel: `https://tricky-moose-59.loca.lt`
+- API tunnel: `https://wicked-mayfly-44.loca.lt`
+- AI sidecar tunnel: `https://gentle-deer-46.loca.lt`
 
 The public demo works across devices while the local API, AI sidecar, and tunnel sessions remain running on this development machine. For a permanent deployment, replace the tunnel setup with a hosted backend and cloud PostgreSQL database, then redeploy both portals with `VITE_API_BASE_URL` and `VITE_AI_ENGINE_URL` pointing to durable HTTPS services.
 

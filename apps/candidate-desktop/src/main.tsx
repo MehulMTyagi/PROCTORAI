@@ -465,13 +465,13 @@ function App() {
 
   async function checkSidecarHealth() {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 8000);
+    const timeout = window.setTimeout(() => controller.abort(), 20000);
     try {
       const response = await fetch(`${AI_ENGINE_BASE}/health`, {
         headers: TUNNEL_BYPASS_HEADERS,
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error("Sidecar returned an error");
+      if (!response.ok) throw new Error(`Sidecar returned ${response.status}`);
       const health = (await response.json()) as { status: string; model: AiModelInfo };
       setAiModel(health.model);
       setFaceMonitor((current) => ({
@@ -480,10 +480,14 @@ function App() {
       }));
       updateCheck("sidecar", health.status === "ok" ? "pass" : "fail", health.status === "ok" ? "Local monitoring is available" : "Local monitoring is not ready. Restart the service and retry.");
       return health.status === "ok";
-    } catch {
+    } catch (nextError) {
       setAiModel(null);
       setFaceMonitor((current) => ({ ...current, status: "idle", detail: "Sidecar pending" }));
-      updateCheck("sidecar", "fail", "Local monitoring is unavailable. Start the monitoring service and retry.");
+      updateCheck(
+        "sidecar",
+        "fail",
+        `Local monitoring is unavailable: ${errorMessage(nextError, "health check failed")}`,
+      );
       return false;
     } finally {
       window.clearTimeout(timeout);

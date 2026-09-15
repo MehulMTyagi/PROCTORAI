@@ -26,6 +26,7 @@ class Settings(BaseSettings):
             "http://127.0.0.1:5174",
         ]
     )
+    cors_origin_regex: str | None = r"https://.*\.vercel\.app"
 
     jwt_secret: str = "CHANGE_ME"
     jwt_access_minutes: int = 30

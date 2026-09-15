@@ -74,8 +74,8 @@ Seed users:
 - Removed TensorFlow.js and COCO-SSD dependencies from the candidate package.
 - Restarted the local AI sidecar on `http://127.0.0.1:8765`; YOLO warmed up successfully and reported model version `8.4.30`.
 - Current public tunnels:
-  - API: `https://friendly-owl-32.loca.lt`
-  - AI sidecar: `https://tricky-moose-59.loca.lt`
+  - API: `https://wicked-mayfly-44.loca.lt`
+  - AI sidecar: `https://gentle-deer-46.loca.lt`
 - Verification:
   - `python -m pytest services/ai-engine/tests -q` -> `7 passed`
   - `python -m pytest services/api/tests/test_events.py -q` -> `9 passed`
@@ -84,6 +84,30 @@ Seed users:
   - Public AI tunnel smoke: `POST https://tricky-moose-59.loca.lt/detect-objects` returned a `PHONE_DETECTED` candidate with `detector=ultralytics-yolo`.
   - Public API smoke: created a `PHONE_DETECTED` integrity event and proctor listing returned `evidence_status=READY` with `detector=ultralytics-yolo`.
   - Redeployed candidate production alias: `https://candidate-desktop.vercel.app`.
+
+2026-09-15 local monitoring availability fix:
+
+- User reported the candidate System page still showed: "Local monitoring is unavailable. Start the monitoring service and retry."
+- Checks showed the local YOLO sidecar was healthy, but public LocalTunnel URLs had changed/expired and CORS was too narrow for generated Vercel deployment URLs.
+- Fix:
+  - Added `allow_origin_regex` support to the API CORS middleware, defaulting to `https://.*\.vercel\.app`.
+  - Added `CORS_ORIGIN_REGEX` support to the AI sidecar CORS middleware, defaulting to `https://.*\.vercel\.app`.
+  - Increased candidate sidecar health-check timeout from 8 seconds to 20 seconds and surfaced the actual health-check error in the System page detail.
+  - Restarted local API on `http://127.0.0.1:8010` and AI sidecar on `http://127.0.0.1:8765`.
+  - Started fresh LocalTunnel URLs:
+    - API: `https://wicked-mayfly-44.loca.lt`
+    - AI sidecar: `https://gentle-deer-46.loca.lt`
+  - Redeployed both production aliases against the fresh tunnels:
+    - Web portal: `https://web-portal-six-kappa.vercel.app`
+    - Candidate portal: `https://candidate-desktop.vercel.app`
+- Verification:
+  - `python -m pytest services/ai-engine/tests -q` -> `7 passed`
+  - `python -m pytest services/api/tests/test_events.py -q` -> `9 passed`
+  - `npm run build:candidate` -> passed
+  - `npm run build:web` -> passed
+  - Public API health returned OK through `https://wicked-mayfly-44.loca.lt`.
+  - Public AI/YOLO health returned OK through `https://gentle-deer-46.loca.lt`.
+  - Browser-style CORS preflight passed for both `https://candidate-desktop.vercel.app` and the generated Vercel deployment origin.
 
 2026-09-14 real-time camera/microphone integrity events:
 
@@ -130,7 +154,7 @@ Seed users:
   - The public API LocalTunnel was again returning `503`, which breaks deployed portal authentication, assessment loading, heartbeats, and event delivery.
   - Candidate camera/object monitoring was coupled to `sidecarReady`, so if the face sidecar was pending or flaky the camera stream and browser phone detector could fail to start.
 - Fix:
-  - Restarted the API LocalTunnel; LocalTunnel could not reclaim `https://wicked-duck-66.loca.lt`, so the current API tunnel is `https://friendly-owl-32.loca.lt`.
+  - Restarted the API LocalTunnel; LocalTunnel could not reclaim `https://wicked-duck-66.loca.lt`, so the then-current API tunnel became `https://friendly-owl-32.loca.lt`.
   - Candidate camera stream now starts whenever an attempt is active and browser media APIs are available; face analysis still requires the sidecar, but camera-disabled events and object/phone detection no longer depend on `sidecarReady`.
   - Candidate status grid now shows the real face/camera monitor state instead of forcing `Pending` whenever the sidecar is unavailable.
 - Verification:
@@ -178,8 +202,8 @@ Seed users:
   - `https://candidate-desktop.vercel.app`
   - Deployment URL: `https://candidate-desktop-7bupdkdpw-mehul-tyagis-projects.vercel.app`
 - The deployed portals are currently wired to temporary public LocalTunnel URLs:
-  - ProctorAI API tunnel: `https://friendly-owl-32.loca.lt`
-  - AI sidecar tunnel: `https://tricky-moose-59.loca.lt`
+  - ProctorAI API tunnel: `https://wicked-mayfly-44.loca.lt`
+  - AI sidecar tunnel: `https://gentle-deer-46.loca.lt`
 - Local services backing those tunnels must stay running on this machine:
   - API: `http://127.0.0.1:8010`
   - AI sidecar: `http://127.0.0.1:8765`
