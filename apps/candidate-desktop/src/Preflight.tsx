@@ -226,10 +226,10 @@ export default function Preflight(props: Props) {
     if (!context) return [];
 
     const frames: string[] = [];
-    for (let index = 0; index < 6; index += 1) {
+    for (let index = 0; index < 10; index += 1) {
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       frames.push(canvas.toDataURL("image/jpeg", 0.58));
-      await new Promise((resolve) => window.setTimeout(resolve, 260));
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
     }
     return frames;
   }
@@ -249,7 +249,7 @@ export default function Preflight(props: Props) {
 
     try {
       const frames = await captureFrameBurst();
-      if (frames.length < 4) throw new Error("Could not capture enough live frames.");
+      if (frames.length < 6) throw new Error("Could not capture enough live frames.");
       const nextSamples = [
         ...challengeSamples,
         { prompt: challengeOrder[challengeIndex].prompt, frame_data_urls: frames },
@@ -284,6 +284,13 @@ export default function Preflight(props: Props) {
     setChallengeIndex(0);
     setChallengeSamples([]);
     onCheck("liveness", "pending", "Run the blink and head-turn prompts.");
+  }
+
+  function attachLivenessPreview(node: HTMLVideoElement | null) {
+    livenessVideo.current = node;
+    if (!node || !camera.current) return;
+    node.srcObject = camera.current;
+    void node.play().catch(() => {});
   }
 
   return <div className="preflight-layout">
@@ -355,9 +362,9 @@ export default function Preflight(props: Props) {
       </section>}
 
       {index === 5 && <section aria-label="Liveness challenge">
-        <p className="page-description">Complete the randomized live-camera prompts. Press capture, then perform the prompt clearly while frames are sampled locally.</p>
+        <p className="page-description">Complete the randomized live-camera prompts. Press capture, then keep doing the prompt slowly until sampling finishes.</p>
         <div className="camera-preview">
-          {pass("camera") ? <video autoPlay muted playsInline aria-label="Liveness camera preview" ref={livenessVideo} />
+          {pass("camera") ? <video autoPlay muted playsInline aria-label="Liveness camera preview" ref={attachLivenessPreview} />
             : <div className="preview-placeholder"><ScanFace size={36} /><span>Camera check required before liveness</span></div>}
           <span className="preview-label"><span className={pass("camera") ? "live-dot" : ""} />Local liveness preview</span>
           <canvas ref={livenessCanvas} aria-hidden="true" hidden />
@@ -365,7 +372,7 @@ export default function Preflight(props: Props) {
         <div className="liveness-panel">
           <span className="eyebrow">Prompt {Math.min(challengeIndex + 1, challengeOrder.length)} of {challengeOrder.length}</span>
           <h2>{challengeOrder[Math.min(challengeIndex, challengeOrder.length - 1)].label}</h2>
-          <p>{pass("liveness") ? "Challenge complete." : "Click capture, then complete the prompt during the short sampling window."}</p>
+          <p>{pass("liveness") ? "Challenge complete." : testing ? "Sampling now. Keep the movement visible until the button unlocks." : "Click capture, then perform the prompt slowly for about three seconds."}</p>
         </div>
         <CheckResult check={checks.find((check) => check.key === "liveness")!} />
         <div className="liveness-actions">

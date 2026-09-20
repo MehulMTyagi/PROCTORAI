@@ -36,7 +36,7 @@ Completed:
 - Week 4: consent gate, readiness checks, heartbeats, focus/fullscreen/heartbeat-gap events, retry queue, proctor high-priority visibility.
 - Week 5: local AI sidecar, OpenCV face counting, debounced `FACE_ABSENT` and `MULTIPLE_PERSONS` candidates, candidate sidecar integration, face-event demos, proctor visibility.
 - Week 6: protected evidence upload/download, SHA-256 verification, candidate rolling media buffer, pre/post clips, evidence status transitions, proctor playback.
-- Week 7: duplicate-suppressed YOLO phone events, sidecar-verified randomized active liveness setup, `LIVENESS_FAILED` event path with proof/evidence.
+- Week 7: duplicate-suppressed YOLO phone events, sidecar-verified randomized active liveness setup with motion fallback, `LIVENESS_FAILED` event path with proof/evidence.
 
 Next:
 
@@ -46,7 +46,7 @@ Next:
 
 Expected development URLs:
 
-- API: `http://127.0.0.1:8000`
+- API: `http://127.0.0.1:8010`
 - AI engine: `http://127.0.0.1:8765`
 - Web portal: `http://127.0.0.1:5173`
 - Candidate runner: `http://127.0.0.1:5174`
@@ -64,6 +64,22 @@ Seed users:
 
 ## Latest Stabilization Pass
 
+2026-09-20 liveness reliability pass:
+
+- Fixed false failures in the active liveness setup by adding frame-to-frame motion scoring to the AI sidecar verifier.
+- Candidate preflight now captures ten frames over roughly three seconds per prompt so users have enough time to blink or turn slowly.
+- Candidate liveness preview now explicitly reattaches the already-approved camera stream when the liveness step renders.
+- `/verify-liveness` still prefers direct evidence from eye-state changes, face-center movement, and profile-face cues, but can pass real webcam variance with lower-confidence motion fallback when those detectors miss.
+- Verification:
+  - `python -m pytest services/ai-engine/tests -q` -> `10 passed`
+  - `npm run build:candidate` -> passed
+  - `python -m pytest services/api/tests -q` -> `35 passed`
+  - `npm run build:web` -> passed
+  - `cargo check` in `apps/candidate-desktop/src-tauri` -> passed
+  - Restarted local AI sidecar on `http://127.0.0.1:8765`.
+  - Live health checks passed for API `8010`, AI `8765`, web `5173`, and candidate `5174`.
+  - Live `/verify-liveness` motion-fallback smoke returned `passed=true`.
+
 2026-09-20 Week 7 completion:
 
 - Hardened phone detection:
@@ -74,15 +90,15 @@ Seed users:
 - Added active liveness setup:
   - new preflight `Liveness` step;
   - randomized blink / left / right prompts;
-  - six-frame local burst capture for each prompt;
+  - ten-frame, roughly three-second local burst capture for each prompt;
   - AI sidecar `/verify-liveness` validation;
-  - one-face ratio, blink eye-state change, and directional turn checks;
+  - one-face ratio, blink eye-state change, directional turn checks, and motion fallback for normal webcam variance;
   - start remains blocked until liveness passes.
 - Added `LIVENESS_FAILED` event path with proof/evidence support through the Week 6 rolling clip pipeline.
 - Updated seeded/default rules for `PHONE_DETECTED` and `LIVENESS_FAILED`.
 - Verification:
   - `python -m pytest services/api/tests -q` -> `35 passed`
-  - `python -m pytest services/ai-engine/tests -q` -> `9 passed`
+  - `python -m pytest services/ai-engine/tests -q` -> `10 passed`
   - `npm run build:candidate` -> passed
   - `npm run build:web` -> passed
   - `cargo check` in `apps/candidate-desktop/src-tauri` -> passed

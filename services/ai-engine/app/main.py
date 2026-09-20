@@ -175,6 +175,8 @@ def _signals_from_observed(observed) -> list[LivenessFrameSignals]:
         len(observed.face_counts),
         len(observed.eye_counts),
         len(observed.face_center_offsets),
+        len(observed.motion_scores),
+        len(observed.upper_motion_scores),
         1,
     )
     signals: list[LivenessFrameSignals] = []
@@ -190,6 +192,10 @@ def _signals_from_observed(observed) -> list[LivenessFrameSignals]:
                 ),
                 profile_left_seen=observed.profile_left_seen,
                 profile_right_seen=observed.profile_right_seen,
+                motion_score=observed.motion_scores[index] if index < len(observed.motion_scores) else 0.0,
+                upper_motion_score=(
+                    observed.upper_motion_scores[index] if index < len(observed.upper_motion_scores) else 0.0
+                ),
             )
         )
     return signals
@@ -205,9 +211,15 @@ def _evaluate_liveness_prompt(prompt: str, signals: list[LivenessFrameSignals], 
     face_counts = [signal.face_count for signal in signals]
     eye_counts = [signal.eye_count for signal in signals]
     offsets = [signal.face_center_offset for signal in signals if signal.face_center_offset is not None]
+    motion_scores = [signal.motion_score for signal in signals]
+    upper_motion_scores = [signal.upper_motion_score for signal in signals]
     single_face_ratio = sum(1 for count in face_counts if count == 1) / max(len(face_counts), 1)
+    any_face_ratio = sum(1 for count in face_counts if count >= 1) / max(len(face_counts), 1)
     one_face_ok = single_face_ratio >= config.min_single_face_ratio
     enough_samples = len(signals) >= config.min_samples_per_prompt
+    max_motion = max(motion_scores or [0.0])
+    max_upper_motion = max(upper_motion_scores or [0.0])
+    offset_span = (max(offsets) - min(offsets)) if len(offsets) > 1 else 0.0
     reasons: list[str] = []
     if not enough_samples:
         reasons.append("too_few_samples")
@@ -219,8 +231,12 @@ def _evaluate_liveness_prompt(prompt: str, signals: list[LivenessFrameSignals], 
     evidence = {
         "sample_count": len(signals),
         "single_face_ratio": round(single_face_ratio, 3),
+        "any_face_ratio": round(any_face_ratio, 3),
         "eye_counts": eye_counts,
         "face_center_offsets": [round(value, 4) for value in offsets],
+        "max_motion_score": round(max_motion, 4),
+        "max_upper_motion_score": round(max_upper_motion, 4),
+        "offset_span": round(offset_span, 4),
         "profile_left_seen": any(signal.profile_left_seen for signal in signals),
         "profile_right_seen": any(signal.profile_right_seen for signal in signals),
     }
@@ -228,23 +244,58 @@ def _evaluate_liveness_prompt(prompt: str, signals: list[LivenessFrameSignals], 
     if prompt == "BLINK":
         has_open = max(eye_counts or [0]) >= config.min_eye_open_count
         has_closed = min(eye_counts or [0]) == 0
-        action_passed = has_open and has_closed
-        action_confidence = 0.95 if action_passed else 0.35 if has_open or has_closed else 0.1
+        motion_blink = max_upper_motion >= config.min_blink_motion_score and any_face_ratio >= config.min_single_face_ratio
+        action_passed = (has_open and has_closed) or motion_blink
+        action_confidence = (
+            0.95 if has_open and has_closed else
+            0.72 if motion_blink else
+            0.35 if has_open or has_closed else
+            0.1
+        )
+        evidence["motion_fallback_used"] = motion_blink and not (has_open and has_closed)
         if not action_passed:
             reasons.append("blink_not_observed")
     elif prompt == "TURN_LEFT":
         min_offset = min(offsets) if offsets else 0.0
         profile_seen = any(signal.profile_left_seen for signal in signals)
-        action_passed = min_offset <= -config.min_turn_offset or profile_seen
-        action_confidence = min(0.95, max(abs(min_offset) / max(config.min_turn_offset, 0.01), 1.0 if profile_seen else 0) * 0.75)
+        directional_turn = min_offset <= -config.min_turn_offset or profile_seen
+        motion_turn = (
+            not directional_turn
+            and any_face_ratio >= config.min_single_face_ratio
+            and (offset_span >= config.min_turn_offset or max_motion >= config.min_motion_score)
+        )
+        action_passed = directional_turn or motion_turn
+        action_confidence = min(
+            0.95,
+            max(
+                abs(min_offset) / max(config.min_turn_offset, 0.01),
+                1.0 if profile_seen else 0,
+                0.72 if motion_turn else 0,
+            ) * 0.75,
+        )
+        evidence["motion_fallback_used"] = motion_turn
         if not action_passed:
             reasons.append("left_turn_not_observed")
         evidence["min_offset"] = round(min_offset, 4)
     elif prompt == "TURN_RIGHT":
         max_offset = max(offsets) if offsets else 0.0
         profile_seen = any(signal.profile_right_seen for signal in signals)
-        action_passed = max_offset >= config.min_turn_offset or profile_seen
-        action_confidence = min(0.95, max(abs(max_offset) / max(config.min_turn_offset, 0.01), 1.0 if profile_seen else 0) * 0.75)
+        directional_turn = max_offset >= config.min_turn_offset or profile_seen
+        motion_turn = (
+            not directional_turn
+            and any_face_ratio >= config.min_single_face_ratio
+            and (offset_span >= config.min_turn_offset or max_motion >= config.min_motion_score)
+        )
+        action_passed = directional_turn or motion_turn
+        action_confidence = min(
+            0.95,
+            max(
+                abs(max_offset) / max(config.min_turn_offset, 0.01),
+                1.0 if profile_seen else 0,
+                0.72 if motion_turn else 0,
+            ) * 0.75,
+        )
+        evidence["motion_fallback_used"] = motion_turn
         if not action_passed:
             reasons.append("right_turn_not_observed")
         evidence["max_offset"] = round(max_offset, 4)

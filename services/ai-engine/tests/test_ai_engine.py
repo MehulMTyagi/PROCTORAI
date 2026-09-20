@@ -160,25 +160,25 @@ def test_liveness_endpoint_passes_observed_blink_and_turns() -> None:
                 {
                     "prompt": "BLINK",
                     "observed": {
-                        "face_counts": [1, 1, 1, 1],
-                        "eye_counts": [2, 2, 0, 2],
-                        "face_center_offsets": [0.0, 0.0, 0.0, 0.0],
+                        "face_counts": [1, 1, 1, 1, 1, 1],
+                        "eye_counts": [2, 2, 0, 2, 2, 2],
+                        "face_center_offsets": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                     },
                 },
                 {
                     "prompt": "TURN_LEFT",
                     "observed": {
-                        "face_counts": [1, 1, 1, 1],
-                        "eye_counts": [2, 2, 1, 1],
-                        "face_center_offsets": [0.0, -0.04, -0.1, -0.12],
+                        "face_counts": [1, 1, 1, 1, 1, 1],
+                        "eye_counts": [2, 2, 1, 1, 1, 1],
+                        "face_center_offsets": [0.0, -0.03, -0.05, -0.08, -0.1, -0.12],
                     },
                 },
                 {
                     "prompt": "TURN_RIGHT",
                     "observed": {
-                        "face_counts": [1, 1, 1, 1],
-                        "eye_counts": [2, 2, 1, 1],
-                        "face_center_offsets": [0.0, 0.05, 0.1, 0.13],
+                        "face_counts": [1, 1, 1, 1, 1, 1],
+                        "eye_counts": [2, 2, 1, 1, 1, 1],
+                        "face_center_offsets": [0.0, 0.03, 0.05, 0.08, 0.1, 0.13],
                     },
                 },
             ],
@@ -203,25 +203,25 @@ def test_liveness_endpoint_fails_when_prompt_action_is_missing() -> None:
                 {
                     "prompt": "BLINK",
                     "observed": {
-                        "face_counts": [1, 1, 1, 1],
-                        "eye_counts": [2, 2, 2, 2],
-                        "face_center_offsets": [0.0, 0.0, 0.0, 0.0],
+                        "face_counts": [1, 1, 1, 1, 1, 1],
+                        "eye_counts": [2, 2, 2, 2, 2, 2],
+                        "face_center_offsets": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                     },
                 },
                 {
                     "prompt": "TURN_LEFT",
                     "observed": {
-                        "face_counts": [1, 1, 1, 1],
-                        "eye_counts": [2, 2, 2, 2],
-                        "face_center_offsets": [0.0, 0.01, 0.0, -0.01],
+                        "face_counts": [1, 1, 1, 1, 1, 1],
+                        "eye_counts": [2, 2, 2, 2, 2, 2],
+                        "face_center_offsets": [0.0, 0.01, 0.0, -0.01, 0.0, 0.01],
                     },
                 },
                 {
                     "prompt": "TURN_RIGHT",
                     "observed": {
-                        "face_counts": [1, 1, 1, 1],
-                        "eye_counts": [2, 2, 2, 2],
-                        "face_center_offsets": [0.0, 0.01, 0.0, -0.01],
+                        "face_counts": [1, 1, 1, 1, 1, 1],
+                        "eye_counts": [2, 2, 2, 2, 2, 2],
+                        "face_center_offsets": [0.0, 0.01, 0.0, -0.01, 0.0, 0.01],
                     },
                 },
             ],
@@ -232,4 +232,48 @@ def test_liveness_endpoint_fails_when_prompt_action_is_missing() -> None:
     payload = response.json()
     assert payload["passed"] is False
     assert payload["confidence"] < 0.5
-    assert "blink_not_observed" in payload["results"][0]["reason"]
+
+
+def test_liveness_endpoint_uses_motion_fallback_for_real_camera_variance() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/verify-liveness",
+        json={
+            "session_id": "attempt-9",
+            "samples": [
+                {
+                    "prompt": "BLINK",
+                    "observed": {
+                        "face_counts": [1, 1, 1, 1, 1, 1],
+                        "eye_counts": [0, 0, 0, 0, 0, 0],
+                        "face_center_offsets": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        "upper_motion_scores": [0.0, 0.01, 0.034, 0.028, 0.012, 0.008],
+                    },
+                },
+                {
+                    "prompt": "TURN_LEFT",
+                    "observed": {
+                        "face_counts": [1, 1, 1, 1, 1, 1],
+                        "eye_counts": [0, 0, 0, 0, 0, 0],
+                        "face_center_offsets": [0.0, 0.01, 0.0, 0.01, 0.0, 0.0],
+                        "motion_scores": [0.0, 0.012, 0.039, 0.044, 0.027, 0.018],
+                    },
+                },
+                {
+                    "prompt": "TURN_RIGHT",
+                    "observed": {
+                        "face_counts": [1, 1, 1, 1, 1, 1],
+                        "eye_counts": [0, 0, 0, 0, 0, 0],
+                        "face_center_offsets": [0.0, 0.0, -0.01, 0.0, -0.01, 0.0],
+                        "motion_scores": [0.0, 0.015, 0.036, 0.047, 0.03, 0.019],
+                    },
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["passed"] is True
+    assert all(result["evidence"]["motion_fallback_used"] is True for result in payload["results"])

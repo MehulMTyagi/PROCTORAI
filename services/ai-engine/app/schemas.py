@@ -22,10 +22,12 @@ class ObjectMonitorConfig(BaseModel):
 
 
 class LivenessConfig(BaseModel):
-    min_single_face_ratio: float = Field(default=0.6, ge=0.1, le=1)
-    min_turn_offset: float = Field(default=0.08, ge=0.02, le=0.4)
-    min_samples_per_prompt: int = Field(default=4, ge=2, le=12)
+    min_single_face_ratio: float = Field(default=0.45, ge=0.1, le=1)
+    min_turn_offset: float = Field(default=0.04, ge=0.01, le=0.4)
+    min_samples_per_prompt: int = Field(default=6, ge=2, le=16)
     min_eye_open_count: int = Field(default=1, ge=0, le=4)
+    min_motion_score: float = Field(default=0.035, ge=0.005, le=0.3)
+    min_blink_motion_score: float = Field(default=0.025, ge=0.005, le=0.3)
 
 
 class AnalyzeFrameRequest(BaseModel):
@@ -67,13 +69,15 @@ class ObservedLivenessSignals(BaseModel):
     face_counts: list[int] = Field(default_factory=list)
     eye_counts: list[int] = Field(default_factory=list)
     face_center_offsets: list[float] = Field(default_factory=list)
+    motion_scores: list[float] = Field(default_factory=list)
+    upper_motion_scores: list[float] = Field(default_factory=list)
     profile_left_seen: bool = False
     profile_right_seen: bool = False
 
 
 class LivenessPromptSample(BaseModel):
     prompt: Literal["BLINK", "TURN_LEFT", "TURN_RIGHT"]
-    frame_data_urls: list[str] = Field(default_factory=list, max_length=12)
+    frame_data_urls: list[str] = Field(default_factory=list, max_length=16)
     observed: ObservedLivenessSignals | None = None
 
     @model_validator(mode="after")

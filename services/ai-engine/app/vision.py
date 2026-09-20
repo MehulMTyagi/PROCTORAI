@@ -46,6 +46,8 @@ class LivenessFrameSignals:
     face_center_offset: float | None
     profile_left_seen: bool
     profile_right_seen: bool
+    motion_score: float = 0.0
+    upper_motion_score: float = 0.0
 
 
 class OpenCvFaceDetector:
@@ -97,11 +99,29 @@ class OpenCvLivenessVerifier:
         )
 
     def analyze_frames(self, frame_data_urls: list[str], min_face_size_px: int = 32) -> list[LivenessFrameSignals]:
-        return [self._analyze_frame(frame, min_face_size_px) for frame in frame_data_urls]
+        signals: list[LivenessFrameSignals] = []
+        previous_gray: np.ndarray | None = None
+        for frame in frame_data_urls:
+            image = _decode_data_url(frame)
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            gray_small = cv2.resize(gray, (96, 72), interpolation=cv2.INTER_AREA)
+            motion_score = 0.0
+            upper_motion_score = 0.0
+            if previous_gray is not None:
+                diff = cv2.absdiff(gray_small, previous_gray)
+                motion_score = float(np.mean(diff) / 255.0)
+                upper_motion_score = float(np.mean(diff[:32, :]) / 255.0)
+            signals.append(self._analyze_gray(gray, min_face_size_px, motion_score, upper_motion_score))
+            previous_gray = gray_small
+        return signals
 
-    def _analyze_frame(self, frame_data_url: str, min_face_size_px: int) -> LivenessFrameSignals:
-        image = _decode_data_url(frame_data_url)
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    def _analyze_gray(
+        self,
+        gray: np.ndarray,
+        min_face_size_px: int,
+        motion_score: float,
+        upper_motion_score: float,
+    ) -> LivenessFrameSignals:
         height, width = gray.shape[:2]
         faces = self.face_classifier.detectMultiScale(
             gray,
@@ -144,6 +164,8 @@ class OpenCvLivenessVerifier:
             face_center_offset=face_center_offset,
             profile_left_seen=len(profiles_left) > 0,
             profile_right_seen=len(profiles_right) > 0,
+            motion_score=motion_score,
+            upper_motion_score=upper_motion_score,
         )
 
 

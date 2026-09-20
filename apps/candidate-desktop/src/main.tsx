@@ -1218,10 +1218,12 @@ function App() {
           session_id: selected?.id ?? session?.user.id ?? "preflight",
           samples,
           config: {
-            min_single_face_ratio: 0.6,
-            min_turn_offset: 0.08,
-            min_samples_per_prompt: 4,
+            min_single_face_ratio: 0.45,
+            min_turn_offset: 0.04,
+            min_samples_per_prompt: 6,
             min_eye_open_count: 1,
+            min_motion_score: 0.035,
+            min_blink_motion_score: 0.025,
           },
         }),
       });

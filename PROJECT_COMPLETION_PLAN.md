@@ -355,7 +355,7 @@ Completed additions:
 - active liveness preflight step;
 - randomized blink / left / right challenge order;
 - AI sidecar `/verify-liveness` validation for liveness prompts;
-- one-face ratio, blink eye-state transition, and directional turn checks;
+- one-face ratio, blink eye-state transition, directional turn checks, and motion fallback for real webcam variance;
 - `LIVENESS_FAILED` event path with proof/evidence support;
 - default proctoring rules for phone detection and liveness failure.
 

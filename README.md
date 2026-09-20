@@ -177,12 +177,12 @@ Week 6 verification:
 - Focused regression confirms candidate evidence upload, hash mismatch rejection, proctor protected download, and evidence failure persistence.
 - Live local smoke confirms event creation, evidence upload, SHA-256 metadata, and protected proctor download.
 
-Week 7 is complete: YOLO phone detection now suppresses duplicate active phone events, the candidate setup flow includes a randomized active liveness challenge verified by the local AI sidecar, `LIVENESS_FAILED` events are supported with proof/evidence, and default proctoring rules include phone and liveness signals.
+Week 7 is complete: YOLO phone detection now suppresses duplicate active phone events, the candidate setup flow includes a randomized active liveness challenge verified by the local AI sidecar, liveness uses a longer ten-frame capture with motion fallback for real webcam variance, `LIVENESS_FAILED` events are supported with proof/evidence, and default proctoring rules include phone and liveness signals.
 
 Week 7 verification:
 
 - Full backend test suite passes with `35 passed`.
-- AI sidecar test suite passes with `9 passed`.
+- AI sidecar test suite passes with `10 passed`.
 - Candidate frontend production build passes.
 - Web portal production build passes.
 - Candidate Tauri scaffold passes `cargo check`.
