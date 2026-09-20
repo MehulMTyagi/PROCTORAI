@@ -1,6 +1,6 @@
 # Week 5 Checkpoint
 
-Date: 2026-09-07
+Date: 2026-09-20
 
 ## Completed
 
@@ -14,6 +14,11 @@ Date: 2026-09-07
   - frame data URL decoding;
   - configurable minimum face size;
   - model metadata returned with each response.
+- Added YOLO object analysis:
+  - Ultralytics YOLO object detector in the local sidecar;
+  - `POST /detect-objects`;
+  - phone-like object event candidates;
+  - model/config metadata returned with each response.
 - Added face-event debouncing:
   - `FACE_ABSENT` after three consecutive absent samples;
   - `MULTIPLE_PERSONS` after two consecutive multiple-face samples;
@@ -24,10 +29,12 @@ Date: 2026-09-07
 - Updated candidate runner:
   - sidecar readiness check now calls `http://127.0.0.1:8765/health`;
   - low-rate camera sampler sends local frames to the sidecar while monitoring is active;
+  - object sampling sends local frames to the sidecar for YOLO phone detection;
   - face monitor status tile shows sidecar state;
   - face monitor panel shows model name, sample count, and latest face count;
   - demo controls create debounced absent-face and multiple-person samples;
-  - AI-derived event candidates are uploaded to the backend as normal integrity events.
+  - AI-derived event candidates are uploaded to the backend as normal integrity events;
+  - camera and microphone integrity events include review proof metadata for proctor inspection.
 - Updated proctor/examiner portal:
   - default rule editor includes `FACE_ABSENT` and `MULTIPLE_PERSONS`;
   - high-priority metric counts the multiple-person face event.
@@ -39,8 +46,8 @@ Date: 2026-09-07
 ## Verified
 
 ```text
-Backend tests: 27 passed
-AI sidecar tests: 5 passed
+Backend tests: 32 passed
+AI sidecar tests: 7 passed
 Web portal build: passed
 Candidate frontend build: passed
 Tauri cargo check: passed
@@ -57,12 +64,14 @@ Multiple People demo produced MULTIPLE_PERSONS after two samples
 Candidate uploaded AI-derived events to the backend
 Proctor queue showed FACE_ABSENT and MULTIPLE_PERSONS
 High Priority metric counted AI-derived high-priority events
+YOLO object endpoint returned a PHONE_DETECTED candidate for an observed phone
+Proof-backed CAMERA_DISABLED, MICROPHONE_DISABLED, BACKGROUND_SPEECH, PHONE_DETECTED, and AI_ENGINE_INTERRUPTED event paths are supported
 ```
 
 ## Local URLs
 
 ```text
-API:              http://127.0.0.1:8000
+API:              http://127.0.0.1:8010
 AI engine:        http://127.0.0.1:8765
 Web portal:       http://127.0.0.1:5173
 Candidate runner: http://127.0.0.1:5174
@@ -79,7 +88,8 @@ examiner@example.com / password123
 ## Notes
 
 - Raw camera frames are sent only to the local sidecar, not to the backend.
-- The current detector is CPU-friendly and zero-cost, but it is a classical Haar cascade and has known accuracy limits.
+- Face counting uses a CPU-friendly Haar cascade and has known accuracy limits.
+- Phone detection uses YOLO through the local sidecar; model binaries stay out of Git.
 - AI event confidence and priority are review hints only. They are not misconduct verdicts.
 - Evidence remains log-only in Week 5. Video clip generation begins in Week 6.
 - The sidecar state is in-memory for local MVP sessions.

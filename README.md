@@ -156,8 +156,8 @@ Week 5 is complete: the local AI sidecar, OpenCV face counting, YOLO phone/objec
 
 Week 5 verification:
 
-- Backend test suite passes with `27 passed`.
-- AI sidecar test suite passes with `5 passed`.
+- Backend test suite passes with `32 passed`.
+- AI sidecar test suite passes with `7 passed`.
 - Web portal production build passes.
 - Candidate frontend production build passes.
 - Candidate Tauri scaffold passes `cargo check`.

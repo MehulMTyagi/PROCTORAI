@@ -62,6 +62,24 @@ Seed users:
 
 ## Latest Stabilization Pass
 
+2026-09-20 Week 5 close-out refresh:
+
+- Confirmed Week 5 is complete with the current implementation:
+  - local AI sidecar;
+  - OpenCV face counting;
+  - debounced `FACE_ABSENT` and `MULTIPLE_PERSONS`;
+  - YOLO `PHONE_DETECTED` object detection;
+  - candidate camera/microphone integrity events with review proof metadata;
+  - proctor visibility for AI-derived and proof-backed events.
+- Updated `docs/capstone/week-5-checkpoint.md` and README verification counts.
+- Verification:
+  - `python -m pytest services/api/tests -q` -> `32 passed`
+  - `python -m pytest services/ai-engine/tests -q` -> `7 passed`
+  - `npm run build:web` -> passed
+  - `npm run build:candidate` -> passed
+  - `cargo check` in `apps/candidate-desktop/src-tauri` -> passed
+  - Local live checks passed for API `8010`, AI `8765`, web `5173`, and candidate `5174`.
+
 2026-09-20 deployed portal connectivity repair:
 
 - User reported both portals still disconnected:
