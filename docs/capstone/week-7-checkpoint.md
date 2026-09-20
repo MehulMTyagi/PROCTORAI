@@ -13,8 +13,11 @@ Date: 2026-09-20
   - new preflight `Liveness` step between microphone and review;
   - randomized blink / left / right challenge order;
   - live local camera preview;
-  - local frame capture for each prompt;
-  - challenge passes only when captured frames change across prompts;
+  - six-frame local burst capture for each prompt;
+  - sidecar `/verify-liveness` verification before the setup check can pass;
+  - one-face ratio enforcement;
+  - blink verification using eye open/closed transition;
+  - left/right turn verification using face-center movement and profile-face cues;
   - assessment start remains blocked until liveness passes.
 - Added liveness event path:
   - `LIVENESS_FAILED` included in candidate monitoring controls;
@@ -28,19 +31,21 @@ Date: 2026-09-20
 
 ```text
 Full backend tests: 35 passed
-AI sidecar tests: 7 passed
+AI sidecar tests: 9 passed
 Candidate frontend build: passed
 Web portal build: passed
 Tauri cargo check: passed
 Seed + event backend tests: 14 passed
 Local API/AI/web/candidate health checks: passed
 Local demo seed refreshed with Week 7 rules
+Live `/verify-liveness` smoke: passed
 ```
 
 ## Notes
 
-- The active liveness challenge is an MVP browser implementation based on randomized prompts and changing local camera frames.
-- It does not yet perform robust blink landmark detection or head-pose estimation.
+- Liveness verification now runs in the local AI sidecar rather than relying on browser-only frame hashes.
+- The current implementation uses OpenCV Haar face, eye, and profile cascades. It is much stronger than hash-change checks, but it is still not a certified anti-spoofing model.
+- Production deployment should add calibration scenarios across devices and lighting conditions before high-stakes use.
 - `LIVENESS_FAILED` events are review signals, not automatic misconduct verdicts.
 - Evidence clips for `LIVENESS_FAILED` use the Week 6 rolling evidence pipeline.
 

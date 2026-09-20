@@ -354,7 +354,8 @@ Completed additions:
 - duplicate-suppressed YOLO phone event flow;
 - active liveness preflight step;
 - randomized blink / left / right challenge order;
-- local frame-change validation for liveness prompts;
+- AI sidecar `/verify-liveness` validation for liveness prompts;
+- one-face ratio, blink eye-state transition, and directional turn checks;
 - `LIVENESS_FAILED` event path with proof/evidence support;
 - default proctoring rules for phone detection and liveness failure.
 

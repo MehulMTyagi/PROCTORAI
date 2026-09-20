@@ -5,6 +5,8 @@ export type ReadinessKey = "backend" | "camera" | "microphone" | "sidecar" | "fu
 export type CheckStatus = "pending" | "pass" | "warning" | "fail";
 export type ReadinessCheck = { key: ReadinessKey; label: string; status: CheckStatus; detail: string };
 type Assessment = { id: string; title: string; description: string | null; duration_minutes: number | null; status: string };
+export type LivenessPrompt = "BLINK" | "TURN_LEFT" | "TURN_RIGHT";
+export type LivenessSample = { prompt: LivenessPrompt; frame_data_urls: string[] };
 type Props = {
   assessments: Assessment[];
   selected: Assessment | null;
@@ -18,6 +20,7 @@ type Props = {
   onConsent: (value: boolean) => void;
   onCheck: (key: ReadinessKey, status: CheckStatus, detail: string) => void;
   onSystemCheck: () => Promise<void>;
+  onLivenessVerify: (samples: LivenessSample[]) => Promise<{ passed: boolean; detail: string }>;
   onFullscreen: () => Promise<void>;
   onStart: () => Promise<void>;
 };
@@ -32,7 +35,11 @@ const steps = [
   { path: "review", label: "Review", title: "Ready for your assessment?", icon: CheckCircle2 },
 ];
 
-const livenessChallenges = ["Blink once", "Turn your head left", "Turn your head right"];
+const livenessChallenges: { label: string; prompt: LivenessPrompt }[] = [
+  { label: "Blink once", prompt: "BLINK" },
+  { label: "Turn your head left", prompt: "TURN_LEFT" },
+  { label: "Turn your head right", prompt: "TURN_RIGHT" },
+];
 
 function shuffledChallenges() {
   const items = [...livenessChallenges];
@@ -42,12 +49,6 @@ function shuffledChallenges() {
     [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
   }
   return items;
-}
-
-async function sha256Hex(input: string) {
-  const bytes = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export function CheckResult({ check }: { check: ReadinessCheck }) {
@@ -66,7 +67,7 @@ export default function Preflight(props: Props) {
   const [level, setLevel] = useState(0);
   const [challengeOrder, setChallengeOrder] = useState(() => shuffledChallenges());
   const [challengeIndex, setChallengeIndex] = useState(0);
-  const [challengeHashes, setChallengeHashes] = useState<string[]>([]);
+  const [challengeSamples, setChallengeSamples] = useState<LivenessSample[]>([]);
   const camera = useRef<MediaStream | null>(null);
   const microphone = useRef<MediaStream | null>(null);
   const livenessVideo = useRef<HTMLVideoElement | null>(null);
@@ -131,7 +132,7 @@ export default function Preflight(props: Props) {
     onCheck("liveness", "pending", "Not checked");
     setChallengeOrder(shuffledChallenges());
     setChallengeIndex(0);
-    setChallengeHashes([]);
+    setChallengeSamples([]);
   }, [consent]);
 
   useEffect(() => {
@@ -198,7 +199,7 @@ export default function Preflight(props: Props) {
         onCheck("liveness", "pending", "Run the liveness challenge after the camera check.");
         setChallengeOrder(shuffledChallenges());
         setChallengeIndex(0);
-        setChallengeHashes([]);
+        setChallengeSamples([]);
       }
     } catch (error) {
       if (request !== generation.current) return;
@@ -214,51 +215,74 @@ export default function Preflight(props: Props) {
     }
   }
 
+  async function captureFrameBurst() {
+    const video = livenessVideo.current;
+    const canvas = livenessCanvas.current;
+    if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return [];
+
+    canvas.width = 224;
+    canvas.height = 168;
+    const context = canvas.getContext("2d");
+    if (!context) return [];
+
+    const frames: string[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      frames.push(canvas.toDataURL("image/jpeg", 0.58));
+      await new Promise((resolve) => window.setTimeout(resolve, 260));
+    }
+    return frames;
+  }
+
   async function captureLivenessFrame() {
     if (!camera.current || !pass("camera")) {
       onCheck("liveness", "fail", "Run the camera check before liveness.");
       return;
     }
 
-    const video = livenessVideo.current;
-    const canvas = livenessCanvas.current;
-    if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+    setTesting(true);
+    if (!livenessVideo.current || livenessVideo.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
       onCheck("liveness", "fail", "Live camera preview is not ready. Reopen the liveness step and retry.");
+      setTesting(false);
       return;
     }
 
-    canvas.width = 224;
-    canvas.height = 168;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.58);
-    const hash = await sha256Hex(dataUrl);
-    const nextHashes = [...challengeHashes, hash];
-    const uniqueCount = new Set(nextHashes).size;
+    try {
+      const frames = await captureFrameBurst();
+      if (frames.length < 4) throw new Error("Could not capture enough live frames.");
+      const nextSamples = [
+        ...challengeSamples,
+        { prompt: challengeOrder[challengeIndex].prompt, frame_data_urls: frames },
+      ];
 
-    if (nextHashes.length >= challengeOrder.length) {
-      if (uniqueCount < challengeOrder.length) {
-        onCheck("liveness", "fail", "Liveness failed because the captured challenge frames did not change. Retry with clear movement.");
-        setChallengeIndex(0);
-        setChallengeHashes([]);
+      if (nextSamples.length >= challengeOrder.length) {
+        const result = await props.onLivenessVerify(nextSamples);
+        if (!result.passed) {
+          onCheck("liveness", "fail", result.detail);
+          setChallengeIndex(0);
+          setChallengeSamples([]);
+          return;
+        }
+        onCheck("liveness", "pass", result.detail);
+        setChallengeIndex(challengeOrder.length - 1);
+        setChallengeSamples(nextSamples);
         return;
       }
-      onCheck("liveness", "pass", "Blink and head-turn challenge completed with changing live frames.");
-      setChallengeIndex(challengeOrder.length - 1);
-      setChallengeHashes(nextHashes);
-      return;
-    }
 
-    setChallengeHashes(nextHashes);
-    setChallengeIndex(nextHashes.length);
-    onCheck("liveness", "pending", `${nextHashes.length} of ${challengeOrder.length} liveness prompts captured.`);
+      setChallengeSamples(nextSamples);
+      setChallengeIndex(nextSamples.length);
+      onCheck("liveness", "pending", `${nextSamples.length} of ${challengeOrder.length} liveness prompts captured.`);
+    } catch (error) {
+      onCheck("liveness", "fail", error instanceof Error ? error.message : "Liveness verification failed.");
+    } finally {
+      setTesting(false);
+    }
   }
 
   function resetLiveness() {
     setChallengeOrder(shuffledChallenges());
     setChallengeIndex(0);
-    setChallengeHashes([]);
+    setChallengeSamples([]);
     onCheck("liveness", "pending", "Run the blink and head-turn prompts.");
   }
 
@@ -331,7 +355,7 @@ export default function Preflight(props: Props) {
       </section>}
 
       {index === 5 && <section aria-label="Liveness challenge">
-        <p className="page-description">Complete the randomized live-camera prompts. Move clearly before capturing each prompt.</p>
+        <p className="page-description">Complete the randomized live-camera prompts. Press capture, then perform the prompt clearly while frames are sampled locally.</p>
         <div className="camera-preview">
           {pass("camera") ? <video autoPlay muted playsInline aria-label="Liveness camera preview" ref={livenessVideo} />
             : <div className="preview-placeholder"><ScanFace size={36} /><span>Camera check required before liveness</span></div>}
@@ -340,12 +364,12 @@ export default function Preflight(props: Props) {
         </div>
         <div className="liveness-panel">
           <span className="eyebrow">Prompt {Math.min(challengeIndex + 1, challengeOrder.length)} of {challengeOrder.length}</span>
-          <h2>{challengeOrder[Math.min(challengeIndex, challengeOrder.length - 1)]}</h2>
-          <p>{pass("liveness") ? "Challenge complete." : "Perform the prompt, then capture the frame."}</p>
+          <h2>{challengeOrder[Math.min(challengeIndex, challengeOrder.length - 1)].label}</h2>
+          <p>{pass("liveness") ? "Challenge complete." : "Click capture, then complete the prompt during the short sampling window."}</p>
         </div>
         <CheckResult check={checks.find((check) => check.key === "liveness")!} />
         <div className="liveness-actions">
-          <button onClick={() => void captureLivenessFrame()} disabled={busy || !pass("camera") || pass("liveness")}><ScanFace size={18} />Capture prompt</button>
+          <button onClick={() => void captureLivenessFrame()} disabled={busy || !pass("camera") || pass("liveness")}><ScanFace size={18} />{testing ? "Sampling..." : "Capture prompt"}</button>
           <button className="secondary-button" onClick={resetLiveness} disabled={busy}><RotateCw size={18} />Reset challenge</button>
         </div>
       </section>}

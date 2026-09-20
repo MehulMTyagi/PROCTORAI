@@ -177,12 +177,12 @@ Week 6 verification:
 - Focused regression confirms candidate evidence upload, hash mismatch rejection, proctor protected download, and evidence failure persistence.
 - Live local smoke confirms event creation, evidence upload, SHA-256 metadata, and protected proctor download.
 
-Week 7 is complete: YOLO phone detection now suppresses duplicate active phone events, the candidate setup flow includes a randomized active liveness challenge, `LIVENESS_FAILED` events are supported with proof/evidence, and default proctoring rules include phone and liveness signals.
+Week 7 is complete: YOLO phone detection now suppresses duplicate active phone events, the candidate setup flow includes a randomized active liveness challenge verified by the local AI sidecar, `LIVENESS_FAILED` events are supported with proof/evidence, and default proctoring rules include phone and liveness signals.
 
 Week 7 verification:
 
 - Full backend test suite passes with `35 passed`.
-- AI sidecar test suite passes with `7 passed`.
+- AI sidecar test suite passes with `9 passed`.
 - Candidate frontend production build passes.
 - Web portal production build passes.
 - Candidate Tauri scaffold passes `cargo check`.
@@ -233,4 +233,4 @@ These deployments are currently wired to temporary Cloudflare Tunnel URLs for th
 
 The public demo works across devices while the local API, AI sidecar, and tunnel sessions remain running on this development machine. The current demo API is using a seeded local SQLite database because Docker Desktop/PostgreSQL was unavailable in this shell. For a permanent deployment, replace the tunnel setup with a hosted backend and cloud PostgreSQL database, then redeploy both portals with `VITE_API_BASE_URL` and `VITE_AI_ENGINE_URL` pointing to durable HTTPS services.
 
-Next task: build the Week 6 rolling evidence pipeline with bounded local media buffering, clip generation, hashing, upload metadata, protected playback, and cleanup behavior.
+Next task: build the Week 8 proctor review workflow and examiner reporting, including stored review decisions, notes, event filters, event detail views, audit logging, and integrity summary reporting.

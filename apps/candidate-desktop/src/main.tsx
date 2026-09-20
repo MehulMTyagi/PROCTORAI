@@ -20,7 +20,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import "./styles.css";
-import Preflight, { type ReadinessCheck, type ReadinessKey, type CheckStatus } from "./Preflight";
+import Preflight, { type LivenessSample, type ReadinessCheck, type ReadinessKey, type CheckStatus } from "./Preflight";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const AI_ENGINE_BASE = import.meta.env.VITE_AI_ENGINE_URL ?? "http://127.0.0.1:8765";
@@ -121,6 +121,12 @@ type YoloObjectResponse = {
   objects: YoloDetectedObject[];
   phone_like_objects: YoloDetectedObject[];
   events: YoloObjectEventCandidate[];
+  model: AiModelInfo;
+};
+type LivenessResponse = {
+  passed: boolean;
+  confidence: number;
+  results: { prompt: string; passed: boolean; reason: string; confidence: number }[];
   model: AiModelInfo;
 };
 type Session = { token: string; user: User };
@@ -1203,6 +1209,39 @@ function App() {
     setStatus("ready");
   }
 
+  async function verifyLiveness(samples: LivenessSample[]) {
+    try {
+      const response = await fetch(`${AI_ENGINE_BASE}/verify-liveness`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...TUNNEL_BYPASS_HEADERS },
+        body: JSON.stringify({
+          session_id: selected?.id ?? session?.user.id ?? "preflight",
+          samples,
+          config: {
+            min_single_face_ratio: 0.6,
+            min_turn_offset: 0.08,
+            min_samples_per_prompt: 4,
+            min_eye_open_count: 1,
+          },
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const verification = await response.json() as LivenessResponse;
+      const failed = verification.results.filter((result) => !result.passed);
+      return {
+        passed: verification.passed,
+        detail: verification.passed
+          ? `Active liveness passed with ${Math.round(verification.confidence * 100)}% confidence.`
+          : `Liveness failed: ${failed.map((result) => `${result.prompt} ${result.reason}`).join("; ")}`,
+      };
+    } catch (nextError) {
+      return {
+        passed: false,
+        detail: `Local liveness verification failed: ${errorMessage(nextError, "sidecar unavailable")}`,
+      };
+    }
+  }
+
   async function startAttempt() {
     if (!selected) return;
     if (!canStartAttempt || !document.fullscreenElement) {
@@ -1349,6 +1388,7 @@ function App() {
         onConsent={(accepted) => { setConsentAccepted(accepted); setConsentAcceptedAt(accepted ? new Date().toISOString() : null); }}
         onCheck={updateCheck}
         onSystemCheck={runReadinessChecks}
+        onLivenessVerify={verifyLiveness}
         onFullscreen={requestFullscreen}
         onStart={startAttempt}
       /> : <main id="main-content" tabIndex={-1} className="active-session">

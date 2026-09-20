@@ -21,6 +21,13 @@ class ObjectMonitorConfig(BaseModel):
     phone_like_classes: list[str] = Field(default_factory=lambda: ["cell phone", "remote"])
 
 
+class LivenessConfig(BaseModel):
+    min_single_face_ratio: float = Field(default=0.6, ge=0.1, le=1)
+    min_turn_offset: float = Field(default=0.08, ge=0.02, le=0.4)
+    min_samples_per_prompt: int = Field(default=4, ge=2, le=12)
+    min_eye_open_count: int = Field(default=1, ge=0, le=4)
+
+
 class AnalyzeFrameRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=128)
     frame_data_url: str | None = None
@@ -54,6 +61,33 @@ class DetectObjectsRequest(BaseModel):
         if self.frame_data_url is None and self.observed_objects is None:
             raise ValueError("Either frame_data_url or observed_objects is required")
         return self
+
+
+class ObservedLivenessSignals(BaseModel):
+    face_counts: list[int] = Field(default_factory=list)
+    eye_counts: list[int] = Field(default_factory=list)
+    face_center_offsets: list[float] = Field(default_factory=list)
+    profile_left_seen: bool = False
+    profile_right_seen: bool = False
+
+
+class LivenessPromptSample(BaseModel):
+    prompt: Literal["BLINK", "TURN_LEFT", "TURN_RIGHT"]
+    frame_data_urls: list[str] = Field(default_factory=list, max_length=12)
+    observed: ObservedLivenessSignals | None = None
+
+    @model_validator(mode="after")
+    def require_frames_or_observation(self) -> "LivenessPromptSample":
+        if not self.frame_data_urls and self.observed is None:
+            raise ValueError("Either frame_data_urls or observed liveness signals are required")
+        return self
+
+
+class VerifyLivenessRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=128)
+    samples: list[LivenessPromptSample] = Field(min_length=1, max_length=6)
+    captured_at: datetime = Field(default_factory=utc_now)
+    config: LivenessConfig = Field(default_factory=LivenessConfig)
 
 
 class ModelInfo(BaseModel):
@@ -104,4 +138,23 @@ class DetectObjectsResponse(BaseModel):
     objects: list[DetectedObject]
     phone_like_objects: list[DetectedObject]
     events: list[ObjectEventCandidate]
+    model: ModelInfo
+
+
+class LivenessPromptResult(BaseModel):
+    prompt: Literal["BLINK", "TURN_LEFT", "TURN_RIGHT"]
+    passed: bool
+    confidence: float = Field(ge=0, le=1)
+    face_count_mode: int
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    reason: str
+
+
+class VerifyLivenessResponse(BaseModel):
+    session_id: str
+    captured_at: datetime
+    processed_at: datetime
+    passed: bool
+    confidence: float = Field(ge=0, le=1)
+    results: list[LivenessPromptResult]
     model: ModelInfo

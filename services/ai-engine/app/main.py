@@ -10,11 +10,14 @@ from app.schemas import (
     DetectObjectsRequest,
     DetectObjectsResponse,
     DetectedObject,
+    LivenessPromptResult,
     ModelInfo,
     ObjectEventCandidate,
+    VerifyLivenessRequest,
+    VerifyLivenessResponse,
     utc_now,
 )
-from app.vision import OpenCvFaceDetector, YoloObjectDetector
+from app.vision import LivenessFrameSignals, OpenCvFaceDetector, OpenCvLivenessVerifier, YoloObjectDetector
 
 app = FastAPI(title="ProctorAI AI Engine", version="0.1.0")
 cors_origins = [
@@ -37,6 +40,7 @@ app.add_middleware(
 
 detector = OpenCvFaceDetector()
 object_detector = YoloObjectDetector()
+liveness_verifier = OpenCvLivenessVerifier()
 debouncer = FaceEventDebouncer()
 
 
@@ -60,6 +64,17 @@ def object_model_info() -> ModelInfo:
     )
 
 
+def liveness_model_info() -> ModelInfo:
+    info = liveness_verifier.info
+    return ModelInfo(
+        name=info.name,
+        version=info.version,
+        detector=info.detector,
+        cascade_path=info.cascade_path,
+        model_path=info.model_path,
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, object]:
     return {
@@ -68,6 +83,7 @@ def health() -> dict[str, object]:
         "version": "0.1.0",
         "model": model_info().model_dump(),
         "object_model": object_model_info().model_dump(),
+        "liveness_model": liveness_model_info().model_dump(),
     }
 
 
@@ -151,4 +167,124 @@ def detect_objects(payload: DetectObjectsRequest) -> DetectObjectsResponse:
         phone_like_objects=phone_like_objects,
         events=events,
         model=object_model_info(),
+    )
+
+
+def _signals_from_observed(observed) -> list[LivenessFrameSignals]:
+    sample_count = max(
+        len(observed.face_counts),
+        len(observed.eye_counts),
+        len(observed.face_center_offsets),
+        1,
+    )
+    signals: list[LivenessFrameSignals] = []
+    for index in range(sample_count):
+        signals.append(
+            LivenessFrameSignals(
+                face_count=observed.face_counts[index] if index < len(observed.face_counts) else 1,
+                eye_count=observed.eye_counts[index] if index < len(observed.eye_counts) else 0,
+                face_center_offset=(
+                    observed.face_center_offsets[index]
+                    if index < len(observed.face_center_offsets)
+                    else None
+                ),
+                profile_left_seen=observed.profile_left_seen,
+                profile_right_seen=observed.profile_right_seen,
+            )
+        )
+    return signals
+
+
+def _mode(values: list[int]) -> int:
+    if not values:
+        return 0
+    return max(set(values), key=values.count)
+
+
+def _evaluate_liveness_prompt(prompt: str, signals: list[LivenessFrameSignals], config) -> LivenessPromptResult:
+    face_counts = [signal.face_count for signal in signals]
+    eye_counts = [signal.eye_count for signal in signals]
+    offsets = [signal.face_center_offset for signal in signals if signal.face_center_offset is not None]
+    single_face_ratio = sum(1 for count in face_counts if count == 1) / max(len(face_counts), 1)
+    one_face_ok = single_face_ratio >= config.min_single_face_ratio
+    enough_samples = len(signals) >= config.min_samples_per_prompt
+    reasons: list[str] = []
+    if not enough_samples:
+        reasons.append("too_few_samples")
+    if not one_face_ok:
+        reasons.append("single_face_ratio_low")
+
+    action_passed = False
+    action_confidence = 0.0
+    evidence = {
+        "sample_count": len(signals),
+        "single_face_ratio": round(single_face_ratio, 3),
+        "eye_counts": eye_counts,
+        "face_center_offsets": [round(value, 4) for value in offsets],
+        "profile_left_seen": any(signal.profile_left_seen for signal in signals),
+        "profile_right_seen": any(signal.profile_right_seen for signal in signals),
+    }
+
+    if prompt == "BLINK":
+        has_open = max(eye_counts or [0]) >= config.min_eye_open_count
+        has_closed = min(eye_counts or [0]) == 0
+        action_passed = has_open and has_closed
+        action_confidence = 0.95 if action_passed else 0.35 if has_open or has_closed else 0.1
+        if not action_passed:
+            reasons.append("blink_not_observed")
+    elif prompt == "TURN_LEFT":
+        min_offset = min(offsets) if offsets else 0.0
+        profile_seen = any(signal.profile_left_seen for signal in signals)
+        action_passed = min_offset <= -config.min_turn_offset or profile_seen
+        action_confidence = min(0.95, max(abs(min_offset) / max(config.min_turn_offset, 0.01), 1.0 if profile_seen else 0) * 0.75)
+        if not action_passed:
+            reasons.append("left_turn_not_observed")
+        evidence["min_offset"] = round(min_offset, 4)
+    elif prompt == "TURN_RIGHT":
+        max_offset = max(offsets) if offsets else 0.0
+        profile_seen = any(signal.profile_right_seen for signal in signals)
+        action_passed = max_offset >= config.min_turn_offset or profile_seen
+        action_confidence = min(0.95, max(abs(max_offset) / max(config.min_turn_offset, 0.01), 1.0 if profile_seen else 0) * 0.75)
+        if not action_passed:
+            reasons.append("right_turn_not_observed")
+        evidence["max_offset"] = round(max_offset, 4)
+
+    passed = enough_samples and one_face_ok and action_passed
+    confidence = min(0.99, action_confidence * (0.9 if one_face_ok else 0.45))
+    return LivenessPromptResult(
+        prompt=prompt,
+        passed=passed,
+        confidence=round(confidence, 3),
+        face_count_mode=_mode(face_counts),
+        evidence=evidence,
+        reason="passed" if passed else ",".join(reasons),
+    )
+
+
+@app.post("/verify-liveness", response_model=VerifyLivenessResponse)
+def verify_liveness(payload: VerifyLivenessRequest) -> VerifyLivenessResponse:
+    results: list[LivenessPromptResult] = []
+    try:
+        for sample in payload.samples:
+            signals = (
+                _signals_from_observed(sample.observed)
+                if sample.observed is not None
+                else liveness_verifier.analyze_frames(sample.frame_data_urls)
+            )
+            results.append(_evaluate_liveness_prompt(sample.prompt, signals, payload.config))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    required_prompts = {"BLINK", "TURN_LEFT", "TURN_RIGHT"}
+    seen_prompts = {result.prompt for result in results}
+    passed = required_prompts.issubset(seen_prompts) and all(result.passed for result in results)
+    confidence = round(sum(result.confidence for result in results) / max(len(results), 1), 3)
+    return VerifyLivenessResponse(
+        session_id=payload.session_id,
+        captured_at=payload.captured_at,
+        processed_at=utc_now(),
+        passed=passed,
+        confidence=confidence if passed else min(confidence, 0.49),
+        results=results,
+        model=liveness_model_info(),
     )

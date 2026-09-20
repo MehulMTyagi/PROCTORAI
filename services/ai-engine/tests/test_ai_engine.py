@@ -147,3 +147,89 @@ def test_yolo_object_endpoint_ignores_non_phone_objects() -> None:
     payload = response.json()
     assert payload["phone_like_objects"] == []
     assert payload["events"] == []
+
+
+def test_liveness_endpoint_passes_observed_blink_and_turns() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/verify-liveness",
+        json={
+            "session_id": "attempt-7",
+            "samples": [
+                {
+                    "prompt": "BLINK",
+                    "observed": {
+                        "face_counts": [1, 1, 1, 1],
+                        "eye_counts": [2, 2, 0, 2],
+                        "face_center_offsets": [0.0, 0.0, 0.0, 0.0],
+                    },
+                },
+                {
+                    "prompt": "TURN_LEFT",
+                    "observed": {
+                        "face_counts": [1, 1, 1, 1],
+                        "eye_counts": [2, 2, 1, 1],
+                        "face_center_offsets": [0.0, -0.04, -0.1, -0.12],
+                    },
+                },
+                {
+                    "prompt": "TURN_RIGHT",
+                    "observed": {
+                        "face_counts": [1, 1, 1, 1],
+                        "eye_counts": [2, 2, 1, 1],
+                        "face_center_offsets": [0.0, 0.05, 0.1, 0.13],
+                    },
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["passed"] is True
+    assert {item["prompt"] for item in payload["results"]} == {"BLINK", "TURN_LEFT", "TURN_RIGHT"}
+    assert payload["model"]["detector"] == "haar-face-eye-profile"
+
+
+def test_liveness_endpoint_fails_when_prompt_action_is_missing() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/verify-liveness",
+        json={
+            "session_id": "attempt-8",
+            "samples": [
+                {
+                    "prompt": "BLINK",
+                    "observed": {
+                        "face_counts": [1, 1, 1, 1],
+                        "eye_counts": [2, 2, 2, 2],
+                        "face_center_offsets": [0.0, 0.0, 0.0, 0.0],
+                    },
+                },
+                {
+                    "prompt": "TURN_LEFT",
+                    "observed": {
+                        "face_counts": [1, 1, 1, 1],
+                        "eye_counts": [2, 2, 2, 2],
+                        "face_center_offsets": [0.0, 0.01, 0.0, -0.01],
+                    },
+                },
+                {
+                    "prompt": "TURN_RIGHT",
+                    "observed": {
+                        "face_counts": [1, 1, 1, 1],
+                        "eye_counts": [2, 2, 2, 2],
+                        "face_center_offsets": [0.0, 0.01, 0.0, -0.01],
+                    },
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["passed"] is False
+    assert payload["confidence"] < 0.5
+    assert "blink_not_observed" in payload["results"][0]["reason"]
