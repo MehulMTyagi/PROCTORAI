@@ -52,6 +52,16 @@ type IntegrityEvent = {
   received_at: string;
   evidence_status: string;
   metadata: Record<string, unknown>;
+  evidence_files: EvidenceFile[];
+};
+type EvidenceFile = {
+  id: string;
+  kind: string;
+  mime_type: string;
+  sha256_hash: string;
+  size_bytes: number;
+  duration_ms: number | null;
+  download_url: string;
 };
 type EventProof = {
   kind?: string;
@@ -104,6 +114,51 @@ function errorMessage(error: unknown, fallback: string) {
 function eventProof(event: IntegrityEvent): EventProof | null {
   const proof = event.metadata?.proof;
   return proof && typeof proof === "object" ? proof as EventProof : null;
+}
+
+function EvidenceClip({ evidence, token }: { evidence: EvidenceFile; token: string }) {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let nextUrl: string | null = null;
+
+    async function loadClip() {
+      setError(null);
+      try {
+        const response = await fetch(`${API_BASE}${evidence.download_url}`, {
+          headers: { Authorization: `Bearer ${token}`, ...TUNNEL_BYPASS_HEADERS },
+        });
+        if (!response.ok) throw new Error(await response.text());
+        nextUrl = URL.createObjectURL(await response.blob());
+        if (!cancelled) setObjectUrl(nextUrl);
+      } catch (nextError) {
+        if (!cancelled) setError(errorMessage(nextError, "Evidence clip could not be loaded."));
+      }
+    }
+
+    void loadClip();
+    return () => {
+      cancelled = true;
+      if (nextUrl) URL.revokeObjectURL(nextUrl);
+    };
+  }, [evidence.download_url, token]);
+
+  return (
+    <div className="evidence-clip">
+      {objectUrl ? (
+        <video controls src={objectUrl} />
+      ) : (
+        <div className="clip-placeholder">{error ?? "Loading evidence clip"}</div>
+      )}
+      <small>
+        {evidence.kind} | {(evidence.size_bytes / 1024).toFixed(1)} KB
+        {evidence.duration_ms ? ` | ${(evidence.duration_ms / 1000).toFixed(1)}s` : ""}
+      </small>
+      <code>SHA-256 {evidence.sha256_hash.slice(0, 16)}...</code>
+    </div>
+  );
 }
 
 async function login(mode: AccountMode): Promise<Session> {
@@ -690,6 +745,13 @@ function App() {
                             </div>
                           </div>
                         )}
+                        {event.evidence_files.length > 0 && session ? (
+                          <div className="evidence-clips">
+                            {event.evidence_files.map((evidence) => (
+                              <EvidenceClip evidence={evidence} key={evidence.id} token={session.token} />
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     </article>
                   ))}

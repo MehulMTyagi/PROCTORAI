@@ -328,6 +328,20 @@ Completed additions:
 
 - Implement rolling buffer, evidence encoding, evidence upload, evidence playback, and hashing.
 
+Status: complete.
+
+Completed additions:
+
+- protected evidence upload endpoint;
+- server-side SHA-256 verification;
+- evidence metadata persistence;
+- protected evidence download/playback route;
+- candidate bounded rolling `MediaRecorder` buffer;
+- default 5-second pre-roll and 5-second post-roll clip generation;
+- browser-side clip hashing and upload;
+- evidence `PENDING`, `READY`, and `FAILED` states;
+- proctor portal protected video playback.
+
 ### Week 7
 
 - Add phone detection and active liveness.
@@ -388,12 +402,11 @@ A feature is done only when:
 
 ## Immediate Next Task
 
-Start Week 6 rolling evidence work:
+Start Week 7 phone detection and liveness hardening:
 
-1. Add a bounded local rolling media buffer in the candidate app.
-2. Capture pre/post context around selected integrity events.
-3. Generate short local clips for evidence-required visual events.
-4. Compute SHA-256 hashes and clip metadata.
-5. Add backend evidence upload and protected retrieval endpoints.
-6. Render evidence metadata and playback affordances in the proctor portal.
-7. Add cleanup behavior for normal temporary media that does not become evidence.
+1. Tune phone detection persistence and duplicate-event merging.
+2. Add active liveness challenge prompts.
+3. Implement blink and left/right head-turn checks where browser signals are stable enough.
+4. Persist `LIVENESS_FAILED` with proof metadata and evidence clips.
+5. Add scenario validation for phone, multiple persons, face absence, normal user, and liveness failure.
+6. Document known false positives/false negatives and device limitations.

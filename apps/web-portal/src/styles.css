@@ -526,6 +526,52 @@ textarea {
   font-size: 11px;
 }
 
+.evidence-clips {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.evidence-clip {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #d7e4ee;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.evidence-clip video,
+.clip-placeholder {
+  width: 100%;
+  min-height: 160px;
+  border-radius: 6px;
+  background: #17212b;
+}
+
+.evidence-clip video {
+  max-height: 360px;
+}
+
+.clip-placeholder {
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  padding: 18px;
+  text-align: center;
+}
+
+.evidence-clip small {
+  color: #5b6f82;
+  font-size: 12px;
+}
+
+.evidence-clip code {
+  overflow-wrap: anywhere;
+  color: #334155;
+  font-size: 11px;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;

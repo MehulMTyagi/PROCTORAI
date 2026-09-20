@@ -164,6 +164,19 @@ Week 5 verification:
 - Browser smoke test confirms sidecar readiness, candidate face-event demos, backend event persistence, and proctor queue visibility for `FACE_ABSENT` and `MULTIPLE_PERSONS`.
 - Focused regression confirms proof-backed `CAMERA_DISABLED`, `MICROPHONE_DISABLED`, `BACKGROUND_SPEECH`, `PHONE_DETECTED`, and `AI_ENGINE_INTERRUPTED` event paths are supported by the same live candidate-to-proctor event flow.
 
+Week 6 is complete: protected evidence upload, server-side SHA-256 verification, local evidence metadata storage, candidate rolling media buffer, pre/post event clips, evidence failure states, protected proctor playback, and event response evidence metadata are in place.
+
+Week 6 verification:
+
+- Full backend test suite passes with `35 passed`.
+- Backend event/evidence tests pass with `12 passed`.
+- AI sidecar test suite passes with `7 passed`.
+- Web portal production build passes.
+- Candidate frontend production build passes.
+- Candidate Tauri scaffold passes `cargo check`.
+- Focused regression confirms candidate evidence upload, hash mismatch rejection, proctor protected download, and evidence failure persistence.
+- Live local smoke confirms event creation, evidence upload, SHA-256 metadata, and protected proctor download.
+
 Local AI sidecar URL:
 
 - AI engine: `http://127.0.0.1:8765`

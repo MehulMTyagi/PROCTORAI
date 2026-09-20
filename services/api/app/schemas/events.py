@@ -5,8 +5,45 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.base_class import utc_now
+from app.models.evidence import EvidenceFile
 from app.models.enums import EvidenceStatus, Severity
 from app.models.integrity_event import IntegrityEvent
+
+
+class EvidenceFileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    event_id: UUID
+    attempt_id: UUID
+    kind: str
+    original_filename: str | None
+    mime_type: str
+    sha256_hash: str
+    size_bytes: int
+    duration_ms: int | None
+    captured_start_at: datetime | None
+    captured_end_at: datetime | None
+    retention_until: datetime | None
+    download_url: str
+
+    @classmethod
+    def from_file(cls, evidence_file: EvidenceFile) -> "EvidenceFileResponse":
+        return cls(
+            id=evidence_file.id,
+            event_id=evidence_file.event_id,
+            attempt_id=evidence_file.attempt_id,
+            kind=evidence_file.kind,
+            original_filename=evidence_file.original_filename,
+            mime_type=evidence_file.mime_type,
+            sha256_hash=evidence_file.sha256_hash,
+            size_bytes=evidence_file.size_bytes,
+            duration_ms=evidence_file.duration_ms,
+            captured_start_at=evidence_file.captured_start_at,
+            captured_end_at=evidence_file.captured_end_at,
+            retention_until=evidence_file.retention_until,
+            download_url=f"/proctor/events/{evidence_file.event_id}/evidence/{evidence_file.id}",
+        )
 
 
 class IntegrityEventCreate(BaseModel):
@@ -17,6 +54,11 @@ class IntegrityEventCreate(BaseModel):
     occurred_at: datetime = Field(default_factory=utc_now)
     evidence_status: str = Field(default=EvidenceStatus.NOT_REQUIRED.value, max_length=32)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvidenceFailureCreate(BaseModel):
+    reason: str = Field(default="upload_failed", max_length=128)
+    detail: str | None = Field(default=None, max_length=1000)
 
 
 class IntegrityEventResponse(BaseModel):
@@ -34,6 +76,7 @@ class IntegrityEventResponse(BaseModel):
     received_at: datetime
     evidence_status: str
     metadata: dict[str, Any]
+    evidence_files: list[EvidenceFileResponse] = Field(default_factory=list)
 
     @classmethod
     def from_event(cls, event: IntegrityEvent, assessment_id: UUID) -> "IntegrityEventResponse":
@@ -50,4 +93,5 @@ class IntegrityEventResponse(BaseModel):
             received_at=event.received_at,
             evidence_status=event.evidence_status,
             metadata=event.payload,
+            evidence_files=[EvidenceFileResponse.from_file(item) for item in event.evidence_files],
         )

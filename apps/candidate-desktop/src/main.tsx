@@ -25,6 +25,9 @@ import Preflight, { type ReadinessCheck, type ReadinessKey, type CheckStatus } f
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const AI_ENGINE_BASE = import.meta.env.VITE_AI_ENGINE_URL ?? "http://127.0.0.1:8765";
 const TUNNEL_BYPASS_HEADERS = { "bypass-tunnel-reminder": "1" };
+const PRE_ROLL_MS = 5000;
+const POST_ROLL_MS = 5000;
+const RECORDER_TIMESLICE_MS = 1000;
 
 type User = { id: string; email: string; full_name: string; role: string };
 type Assessment = {
@@ -65,6 +68,16 @@ type IntegrityEvent = {
   priority_score: number;
   evidence_status: string;
   metadata: Record<string, unknown>;
+  evidence_files: EvidenceFile[];
+};
+type EvidenceFile = {
+  id: string;
+  kind: string;
+  mime_type: string;
+  sha256_hash: string;
+  size_bytes: number;
+  duration_ms: number | null;
+  download_url: string;
 };
 type AiModelInfo = {
   name: string;
@@ -120,6 +133,11 @@ type PendingOperation = {
   label: string;
   queued_at: string;
   status: "queued" | "retrying" | "failed";
+};
+type RollingChunk = {
+  blob: Blob;
+  startedAt: number;
+  endedAt: number;
 };
 
 class ApiError extends Error {
@@ -197,6 +215,15 @@ async function sha256Hex(input: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+async function sha256Blob(blob: Blob) {
+  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
@@ -231,6 +258,8 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const rollingChunksRef = useRef<RollingChunk[]>([]);
   const flushingRef = useRef(false);
   const autoEventRef = useRef<Record<string, number>>({});
   const audioSignalRef = useRef({ consecutiveLoudSamples: 0, lastSentAt: 0 });
@@ -294,6 +323,112 @@ function App() {
       setLastHeartbeatAckAt(new Date().toISOString());
       setHeartbeatGapNotified(false);
     }
+  }
+
+  function stopRollingRecorder() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    mediaRecorderRef.current = null;
+    rollingChunksRef.current = [];
+  }
+
+  function startRollingRecorder(stream: MediaStream) {
+    stopRollingRecorder();
+    if (!window.MediaRecorder) return;
+
+    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
+      ? "video/webm;codecs=vp8"
+      : "video/webm";
+
+    try {
+      const recorder = new MediaRecorder(stream, { mimeType });
+      let chunkStartedAt = Date.now();
+      recorder.ondataavailable = (event) => {
+        const endedAt = Date.now();
+        if (event.data.size > 0) {
+          rollingChunksRef.current = [
+            ...rollingChunksRef.current,
+            { blob: event.data, startedAt: chunkStartedAt, endedAt },
+          ].filter((chunk) => chunk.endedAt >= endedAt - PRE_ROLL_MS - RECORDER_TIMESLICE_MS);
+        }
+        chunkStartedAt = endedAt;
+      };
+      recorder.start(RECORDER_TIMESLICE_MS);
+      mediaRecorderRef.current = recorder;
+    } catch {
+      mediaRecorderRef.current = null;
+      rollingChunksRef.current = [];
+    }
+  }
+
+  async function uploadEvidenceClip(event: IntegrityEvent, capturedAt: string) {
+    if (!attempt || !session || simulateOffline) return;
+
+    const eventTime = new Date(capturedAt).getTime();
+    const captureStart = eventTime - PRE_ROLL_MS;
+    const captureEnd = eventTime + POST_ROLL_MS;
+    await wait(POST_ROLL_MS);
+
+    const chunks = rollingChunksRef.current.filter(
+      (chunk) => chunk.endedAt >= captureStart && chunk.startedAt <= captureEnd,
+    );
+
+    try {
+      if (chunks.length === 0) throw new Error("No rolling media chunks were available for this event.");
+      const mimeType = chunks[0]?.blob.type || "video/webm";
+      const clip = new Blob(chunks.map((chunk) => chunk.blob), { type: mimeType });
+      const sha256_hash = await sha256Blob(clip);
+      const formData = new FormData();
+      formData.set("file", new File([clip], `${event.event_type.toLowerCase()}-${event.id}.webm`, { type: mimeType }));
+      formData.set("kind", "VIDEO");
+      formData.set("sha256_hash", sha256_hash);
+      formData.set("duration_ms", String(captureEnd - captureStart));
+      formData.set("captured_start_at", new Date(captureStart).toISOString());
+      formData.set("captured_end_at", new Date(captureEnd).toISOString());
+
+      const response = await fetch(`${API_BASE}/attempts/${attempt.id}/events/${event.id}/evidence`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.token}`, ...TUNNEL_BYPASS_HEADERS },
+        body: formData,
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const evidenceFile = await response.json() as EvidenceFile;
+      setLastEvent((current) =>
+        current?.id === event.id
+          ? { ...current, evidence_status: "READY", evidence_files: [...current.evidence_files, evidenceFile] }
+          : current,
+      );
+    } catch (nextError) {
+      try {
+        const response = await api<IntegrityEvent>(
+          `/attempts/${attempt.id}/events/${event.id}/evidence/failure`,
+          {
+            method: "POST",
+            headers: authHeaders,
+            body: JSON.stringify({
+              reason: "clip_upload_failed",
+              detail: errorMessage(nextError, "Evidence clip upload failed."),
+            }),
+          },
+          false,
+        );
+        setLastEvent(response);
+      } catch {
+        setLastEvent((current) => current?.id === event.id ? { ...current, evidence_status: "FAILED" } : current);
+      }
+    }
+  }
+
+  function shouldCaptureClip(eventType: string, snapshot: string | null) {
+    return Boolean(snapshot && mediaRecorderRef.current && [
+      "FACE_ABSENT",
+      "MULTIPLE_PERSONS",
+      "PHONE_DETECTED",
+      "CAMERA_DISABLED",
+      "BACKGROUND_SPEECH",
+      "AI_ENGINE_INTERRUPTED",
+    ].includes(eventType));
   }
 
   async function flushQueue() {
@@ -406,8 +541,9 @@ function App() {
     autoEventRef.current[eventType] = now;
     const capturedAt = new Date().toISOString();
     const snapshot = snapshotDataUrl ?? captureFrameDataUrl();
+    const captureClip = shouldCaptureClip(eventType, snapshot);
     const proof = {
-      kind: snapshot ? "CAMERA_SNAPSHOT" : "SESSION_LOG",
+      kind: captureClip ? "ROLLING_CLIP" : snapshot ? "CAMERA_SNAPSHOT" : "SESSION_LOG",
       captured_at: capturedAt,
       source: metadata.source ?? "candidate-monitor",
       page_hidden: document.hidden,
@@ -422,7 +558,9 @@ function App() {
           }
         : null,
       review_note: snapshot
-        ? "Camera snapshot captured locally at the time of the signal."
+        ? captureClip
+          ? "Rolling evidence clip captured locally with pre/post context around the signal."
+          : "Camera snapshot captured locally at the time of the signal."
         : "Browser/session state captured at the time of the signal.",
     };
 
@@ -434,8 +572,9 @@ function App() {
         severity,
         confidence: automatic ? 1 : 0.88,
         priority_score: priorityScore,
-        evidence_status: "READY",
-        metadata: { ...metadata, automatic, queued_from: "candidate-week5-runner", proof },
+        occurred_at: capturedAt,
+        evidence_status: captureClip ? "PENDING" : "READY",
+        metadata: { ...metadata, automatic, queued_from: "candidate-week6-runner", proof },
       },
       eventType.replaceAll("_", " "),
     );
@@ -452,6 +591,7 @@ function App() {
         simulateOffline,
       );
       setLastEvent(event);
+      if (captureClip) void uploadEvidenceClip(event, capturedAt);
       if (!simulateOffline) setStatus("ready");
     } catch (nextError) {
       if (shouldQueueOperation(nextError)) {
@@ -862,6 +1002,7 @@ function App() {
           videoRef.current.srcObject = stream;
           void videoRef.current.play();
         }
+        startRollingRecorder(stream);
         stream.getVideoTracks().forEach((track) => {
           track.onended = () => notifyCameraDisabled("camera_track_ended");
           track.onmute = () => notifyCameraDisabled("camera_track_muted");
@@ -885,6 +1026,7 @@ function App() {
       });
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+      stopRollingRecorder();
     };
   }, [monitoringActive, session?.token, simulateOffline]);
 

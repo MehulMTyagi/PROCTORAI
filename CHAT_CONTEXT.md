@@ -35,10 +35,11 @@ Completed:
 - Week 3: examiner assessment setup, questions, assignments, rules, candidate attempt runner, answer save, submit, basic MCQ scoring.
 - Week 4: consent gate, readiness checks, heartbeats, focus/fullscreen/heartbeat-gap events, retry queue, proctor high-priority visibility.
 - Week 5: local AI sidecar, OpenCV face counting, debounced `FACE_ABSENT` and `MULTIPLE_PERSONS` candidates, candidate sidecar integration, face-event demos, proctor visibility.
+- Week 6: protected evidence upload/download, SHA-256 verification, candidate rolling media buffer, pre/post clips, evidence status transitions, proctor playback.
 
 Next:
 
-- Week 6: rolling evidence pipeline with bounded local media buffer, pre/post clips, hashing, upload metadata, protected playback, and cleanup.
+- Week 7: phone detection and liveness hardening.
 
 ## Local Services
 
@@ -61,6 +62,32 @@ Seed users:
 - `examiner@example.com / password123`
 
 ## Latest Stabilization Pass
+
+2026-09-20 Week 6 completion:
+
+- Implemented the rolling evidence pipeline:
+  - candidate keeps a bounded local `MediaRecorder` buffer from the camera stream;
+  - clip-worthy events create `PENDING` evidence first;
+  - candidate waits for post-roll, builds a local WebM clip, hashes it with SHA-256, and uploads it;
+  - API verifies the hash, stores the file under `evidence_dir`, persists metadata, and marks the event `READY`;
+  - failed clip generation/upload marks the event `FAILED` with failure metadata.
+- Added protected API routes:
+  - `POST /attempts/{attempt_id}/events/{event_id}/evidence`;
+  - `POST /attempts/{attempt_id}/events/{event_id}/evidence/failure`;
+  - `GET /proctor/events/{event_id}/evidence/{evidence_id}`.
+- Extended proctor event responses with `evidence_files`.
+- Proctor portal now fetches protected evidence with the bearer token and renders video playback plus clip metadata/hash preview.
+- Added `python-multipart` to API dependencies.
+- Added `docs/capstone/week-6-checkpoint.md`.
+- Verification:
+  - `python -m pytest services/api/tests -q` -> `35 passed`
+  - `python -m pytest services/api/tests/test_events.py -q` -> `12 passed`
+  - `python -m pytest services/ai-engine/tests -q` -> `7 passed`
+  - `npm run build:web` -> passed
+  - `npm run build:candidate` -> passed
+  - `cargo check` in `apps/candidate-desktop/src-tauri` -> passed
+  - Local live health checks passed for API `8010`, AI `8765`, web `5173`, and candidate `5174`.
+  - Local evidence smoke created a `FACE_ABSENT` event, uploaded hashed evidence, and downloaded it as proctor.
 
 2026-09-20 Week 5 close-out refresh:
 
