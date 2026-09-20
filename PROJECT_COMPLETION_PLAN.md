@@ -347,6 +347,17 @@ Completed additions:
 - Add phone detection and active liveness.
 - Tune thresholds using controlled scenarios.
 
+Status: complete.
+
+Completed additions:
+
+- duplicate-suppressed YOLO phone event flow;
+- active liveness preflight step;
+- randomized blink / left / right challenge order;
+- local frame-change validation for liveness prompts;
+- `LIVENESS_FAILED` event path with proof/evidence support;
+- default proctoring rules for phone detection and liveness failure.
+
 ### Week 8
 
 - Complete proctor review workflow and examiner reports.
@@ -402,11 +413,11 @@ A feature is done only when:
 
 ## Immediate Next Task
 
-Start Week 7 phone detection and liveness hardening:
+Start Week 8 proctor review and examiner reporting:
 
-1. Tune phone detection persistence and duplicate-event merging.
-2. Add active liveness challenge prompts.
-3. Implement blink and left/right head-turn checks where browser signals are stable enough.
-4. Persist `LIVENESS_FAILED` with proof metadata and evidence clips.
-5. Add scenario validation for phone, multiple persons, face absence, normal user, and liveness failure.
-6. Document known false positives/false negatives and device limitations.
+1. Add stored proctor review decisions and notes.
+2. Add event queue filters by event type, status, candidate, and priority.
+3. Build an event detail view with evidence playback, metadata, and review actions.
+4. Add examiner score and integrity summary reporting.
+5. Add audit logging for review changes.
+6. Keep review wording human-centered and avoid automatic misconduct verdicts.

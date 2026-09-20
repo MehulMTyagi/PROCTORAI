@@ -117,6 +117,17 @@ def upsert_dev_assessment(db: Session) -> None:
             "severity": "HIGH",
             "multiple_frame_threshold": 2,
         },
+        "PHONE_DETECTED": {
+            "enabled": True,
+            "severity": "HIGH",
+            "phone_frame_threshold": 2,
+            "clear_frame_threshold": 3,
+        },
+        "LIVENESS_FAILED": {
+            "enabled": True,
+            "severity": "HIGH",
+            "challenge_set": ["blink", "turn_left", "turn_right"],
+        },
     }
     if rule is None:
         db.add(

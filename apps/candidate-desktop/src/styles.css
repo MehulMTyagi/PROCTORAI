@@ -93,6 +93,26 @@ input[type="checkbox"], input[type="radio"] { width: 19px; height: 19px; flex-sh
 .microphone-preview > svg { color: #365b88; }
 .microphone-preview span { color: var(--muted); font-size: 13px; }
 .microphone-preview meter { width: min(100%, 380px); height: 22px; accent-color: var(--accent); }
+.liveness-panel {
+  display: grid;
+  gap: 7px;
+  width: min(100%, 520px);
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  padding: 18px;
+}
+.liveness-panel p {
+  color: var(--muted);
+  font-size: 14px;
+}
+.liveness-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
 .review-assessment { display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--border); padding-bottom: 24px; }
 .review-assessment > svg { color: var(--accent); }
 .review-assessment p { color: var(--muted); font-size: 13px; margin-top: 4px; }

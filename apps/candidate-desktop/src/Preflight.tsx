@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, Circle, ClipboardList, Clock3, Expand, LockKeyhole, Mic, RotateCw, ShieldCheck, Wifi, XCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, Circle, ClipboardList, Clock3, Expand, LockKeyhole, Mic, RotateCw, ScanFace, ShieldCheck, Wifi, XCircle } from "lucide-react";
 
-export type ReadinessKey = "backend" | "camera" | "microphone" | "sidecar" | "fullscreen";
+export type ReadinessKey = "backend" | "camera" | "microphone" | "sidecar" | "fullscreen" | "liveness";
 export type CheckStatus = "pending" | "pass" | "warning" | "fail";
 export type ReadinessCheck = { key: ReadinessKey; label: string; status: CheckStatus; detail: string };
 type Assessment = { id: string; title: string; description: string | null; duration_minutes: number | null; status: string };
@@ -28,8 +28,27 @@ const steps = [
   { path: "system", label: "System", title: "System requirements", icon: Wifi },
   { path: "camera", label: "Camera", title: "Camera check", icon: Camera },
   { path: "microphone", label: "Microphone", title: "Microphone check", icon: Mic },
+  { path: "liveness", label: "Liveness", title: "Liveness challenge", icon: ScanFace },
   { path: "review", label: "Review", title: "Ready for your assessment?", icon: CheckCircle2 },
 ];
+
+const livenessChallenges = ["Blink once", "Turn your head left", "Turn your head right"];
+
+function shuffledChallenges() {
+  const items = [...livenessChallenges];
+  const random = crypto.getRandomValues(new Uint32Array(items.length));
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const swapIndex = random[index] % (index + 1);
+    [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
+  }
+  return items;
+}
+
+async function sha256Hex(input: string) {
+  const bytes = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 export function CheckResult({ check }: { check: ReadinessCheck }) {
   const Icon = check.status === "pass" ? CheckCircle2 : check.status === "pending" ? Circle : XCircle;
@@ -45,14 +64,27 @@ export default function Preflight(props: Props) {
   const [route, setRoute] = useState(() => window.location.hash.slice(2));
   const [testing, setTesting] = useState(false);
   const [level, setLevel] = useState(0);
+  const [challengeOrder, setChallengeOrder] = useState(() => shuffledChallenges());
+  const [challengeIndex, setChallengeIndex] = useState(0);
+  const [challengeHashes, setChallengeHashes] = useState<string[]>([]);
   const camera = useRef<MediaStream | null>(null);
   const microphone = useRef<MediaStream | null>(null);
+  const livenessVideo = useRef<HTMLVideoElement | null>(null);
+  const livenessCanvas = useRef<HTMLCanvasElement | null>(null);
   const generation = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
   const pass = (key: ReadinessKey) => checks.some((check) => check.key === key && check.status === "pass");
-  const completed = [Boolean(selected), consent, pass("backend") && pass("sidecar"), pass("camera"), pass("microphone"), checks.every((check) => check.status === "pass")];
+  const completed = [
+    Boolean(selected),
+    consent,
+    pass("backend") && pass("sidecar"),
+    pass("camera"),
+    pass("microphone"),
+    pass("liveness"),
+    checks.every((check) => check.status === "pass"),
+  ];
   const firstIncomplete = completed.findIndex((done) => !done);
-  const availableThrough = firstIncomplete < 0 ? 5 : Math.min(firstIncomplete, 5);
+  const availableThrough = firstIncomplete < 0 ? 6 : Math.min(firstIncomplete, 6);
   const requestedStep = steps.findIndex((step) => step.path === route);
   const index = Math.min(Math.max(requestedStep, 0), availableThrough);
   const step = steps[index];
@@ -96,7 +128,17 @@ export default function Preflight(props: Props) {
     setTesting(false);
     onCheck("camera", "pending", "Not checked");
     onCheck("microphone", "pending", "Not checked");
+    onCheck("liveness", "pending", "Not checked");
+    setChallengeOrder(shuffledChallenges());
+    setChallengeIndex(0);
+    setChallengeHashes([]);
   }, [consent]);
+
+  useEffect(() => {
+    if (step.path !== "liveness" || !livenessVideo.current || !camera.current) return;
+    livenessVideo.current.srcObject = camera.current;
+    void livenessVideo.current.play().catch(() => {});
+  }, [step.path, checks.find((check) => check.key === "camera")?.status]);
 
   useEffect(() => {
     if (step.path !== "microphone" || !microphone.current || !pass("microphone")) return;
@@ -152,6 +194,12 @@ export default function Preflight(props: Props) {
       track.onended = () => onCheck(kind, "fail", "Device disconnected. Reconnect it and run the check again.");
       track.onmute = () => onCheck(kind, "fail", "Device input paused. Restore access and run the check again.");
       onCheck(kind, "pass", track.label || `${kind === "camera" ? "Camera" : "Microphone"} input available`);
+      if (kind === "camera") {
+        onCheck("liveness", "pending", "Run the liveness challenge after the camera check.");
+        setChallengeOrder(shuffledChallenges());
+        setChallengeIndex(0);
+        setChallengeHashes([]);
+      }
     } catch (error) {
       if (request !== generation.current) return;
       const message = error instanceof DOMException && error.name === "NotAllowedError"
@@ -164,6 +212,54 @@ export default function Preflight(props: Props) {
       window.clearTimeout(timer);
       if (request === generation.current) setTesting(false);
     }
+  }
+
+  async function captureLivenessFrame() {
+    if (!camera.current || !pass("camera")) {
+      onCheck("liveness", "fail", "Run the camera check before liveness.");
+      return;
+    }
+
+    const video = livenessVideo.current;
+    const canvas = livenessCanvas.current;
+    if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      onCheck("liveness", "fail", "Live camera preview is not ready. Reopen the liveness step and retry.");
+      return;
+    }
+
+    canvas.width = 224;
+    canvas.height = 168;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.58);
+    const hash = await sha256Hex(dataUrl);
+    const nextHashes = [...challengeHashes, hash];
+    const uniqueCount = new Set(nextHashes).size;
+
+    if (nextHashes.length >= challengeOrder.length) {
+      if (uniqueCount < challengeOrder.length) {
+        onCheck("liveness", "fail", "Liveness failed because the captured challenge frames did not change. Retry with clear movement.");
+        setChallengeIndex(0);
+        setChallengeHashes([]);
+        return;
+      }
+      onCheck("liveness", "pass", "Blink and head-turn challenge completed with changing live frames.");
+      setChallengeIndex(challengeOrder.length - 1);
+      setChallengeHashes(nextHashes);
+      return;
+    }
+
+    setChallengeHashes(nextHashes);
+    setChallengeIndex(nextHashes.length);
+    onCheck("liveness", "pending", `${nextHashes.length} of ${challengeOrder.length} liveness prompts captured.`);
+  }
+
+  function resetLiveness() {
+    setChallengeOrder(shuffledChallenges());
+    setChallengeIndex(0);
+    setChallengeHashes([]);
+    onCheck("liveness", "pending", "Run the blink and head-turn prompts.");
   }
 
   return <div className="preflight-layout">
@@ -202,7 +298,7 @@ export default function Preflight(props: Props) {
 
       {index === 1 && <section aria-label="Consent requirements">
         <div className="policy-row"><Camera size={23} /><div><h2>Camera & microphone access</h2><p>Your camera supports local face checks during the assessment. Microphone access is checked before you begin; audio is not recorded in this version.</p></div></div>
-        <div className="policy-row"><ShieldCheck size={23} /><div><h2>Privacy & human review</h2><p>Camera frames are analyzed locally. Focus changes, fullscreen exits, connection health, and face-check signals may be sent for proctor review. A signal is not a misconduct decision. This version does not upload media clips.</p></div></div>
+        <div className="policy-row"><ShieldCheck size={23} /><div><h2>Privacy & human review</h2><p>Camera frames are analyzed locally. Focus changes, fullscreen exits, connection health, liveness, and face-check signals may be sent for proctor review. A signal is not a misconduct decision. Short evidence clips are uploaded only when an integrity event needs review.</p></div></div>
         <div className="policy-row"><ClipboardList size={23} /><div><h2>Assessment conditions</h2><p>Camera access, microphone access, a working connection, local monitoring, and fullscreen are required. Contact your examiner before starting if you need an accommodation.</p></div></div>
         <label className="consent-control"><input type="checkbox" checked={consent} onChange={(event) => props.onConsent(event.target.checked)} /><span>I have read this information and consent to monitoring for this assessment.</span></label>
       </section>}
@@ -234,7 +330,27 @@ export default function Preflight(props: Props) {
         <button onClick={() => void testDevice("microphone")} disabled={busy}><Mic size={18} />{testing ? "Checking microphone..." : pass("microphone") ? "Test microphone again" : "Enable microphone"}</button>
       </section>}
 
-      {index === 5 && <section aria-label="Final readiness review">
+      {index === 5 && <section aria-label="Liveness challenge">
+        <p className="page-description">Complete the randomized live-camera prompts. Move clearly before capturing each prompt.</p>
+        <div className="camera-preview">
+          {pass("camera") ? <video autoPlay muted playsInline aria-label="Liveness camera preview" ref={livenessVideo} />
+            : <div className="preview-placeholder"><ScanFace size={36} /><span>Camera check required before liveness</span></div>}
+          <span className="preview-label"><span className={pass("camera") ? "live-dot" : ""} />Local liveness preview</span>
+          <canvas ref={livenessCanvas} aria-hidden="true" hidden />
+        </div>
+        <div className="liveness-panel">
+          <span className="eyebrow">Prompt {Math.min(challengeIndex + 1, challengeOrder.length)} of {challengeOrder.length}</span>
+          <h2>{challengeOrder[Math.min(challengeIndex, challengeOrder.length - 1)]}</h2>
+          <p>{pass("liveness") ? "Challenge complete." : "Perform the prompt, then capture the frame."}</p>
+        </div>
+        <CheckResult check={checks.find((check) => check.key === "liveness")!} />
+        <div className="liveness-actions">
+          <button onClick={() => void captureLivenessFrame()} disabled={busy || !pass("camera") || pass("liveness")}><ScanFace size={18} />Capture prompt</button>
+          <button className="secondary-button" onClick={resetLiveness} disabled={busy}><RotateCw size={18} />Reset challenge</button>
+        </div>
+      </section>}
+
+      {index === 6 && <section aria-label="Final readiness review">
         <div className="review-assessment"><ClipboardList size={25} /><div><h2>{selected?.title}</h2><p>{selected?.duration_minutes == null ? "No time limit specified" : `${selected.duration_minutes} minutes`} / {props.questionCount} questions</p></div></div>
         <div className="requirement-list"><div className="requirement-result pass"><ShieldCheck size={21} /><div><strong>Monitoring consent</strong><p>Accepted for this assessment</p></div><span>Accepted</span></div>
           {checks.map((check) => <CheckResult check={check} key={check.key} />)}</div>
@@ -244,7 +360,7 @@ export default function Preflight(props: Props) {
       <footer className="setup-footer">
         <button className="secondary-button" disabled={index === 0 || busy} onClick={() => navigate(index - 1)}><ArrowLeft size={18} />Back</button>
         <span>{completed.filter(Boolean).length} of {steps.length} complete</span>
-        {index < 5 ? <button disabled={!completed[index] || busy} onClick={() => navigate(index + 1)}>Continue<ArrowRight size={18} /></button>
+        {index < 6 ? <button disabled={!completed[index] || busy} onClick={() => navigate(index + 1)}>Continue<ArrowRight size={18} /></button>
           : <button disabled={!completed.every(Boolean) || busy} onClick={props.onStart}>{props.busy ? "Starting..." : "Start assessment"}<ArrowRight size={18} /></button>}
       </footer>
     </main>

@@ -36,10 +36,11 @@ Completed:
 - Week 4: consent gate, readiness checks, heartbeats, focus/fullscreen/heartbeat-gap events, retry queue, proctor high-priority visibility.
 - Week 5: local AI sidecar, OpenCV face counting, debounced `FACE_ABSENT` and `MULTIPLE_PERSONS` candidates, candidate sidecar integration, face-event demos, proctor visibility.
 - Week 6: protected evidence upload/download, SHA-256 verification, candidate rolling media buffer, pre/post clips, evidence status transitions, proctor playback.
+- Week 7: duplicate-suppressed YOLO phone events, randomized active liveness setup, `LIVENESS_FAILED` event path with proof/evidence.
 
 Next:
 
-- Week 7: phone detection and liveness hardening.
+- Week 8: proctor review workflow and examiner reporting.
 
 ## Local Services
 
@@ -62,6 +63,30 @@ Seed users:
 - `examiner@example.com / password123`
 
 ## Latest Stabilization Pass
+
+2026-09-20 Week 7 completion:
+
+- Hardened phone detection:
+  - still uses local AI sidecar YOLO;
+  - requires two consecutive phone-like samples;
+  - suppresses repeat `PHONE_DETECTED` events while the phone remains active;
+  - clears active phone state after three no-phone samples.
+- Added active liveness setup:
+  - new preflight `Liveness` step;
+  - randomized blink / left / right prompts;
+  - local camera frame capture and frame-change validation;
+  - start remains blocked until liveness passes.
+- Added `LIVENESS_FAILED` event path with proof/evidence support through the Week 6 rolling clip pipeline.
+- Updated seeded/default rules for `PHONE_DETECTED` and `LIVENESS_FAILED`.
+- Verification:
+  - `python -m pytest services/api/tests -q` -> `35 passed`
+  - `python -m pytest services/ai-engine/tests -q` -> `7 passed`
+  - `npm run build:candidate` -> passed
+  - `npm run build:web` -> passed
+  - `cargo check` in `apps/candidate-desktop/src-tauri` -> passed
+  - `python -m pytest services/api/tests/test_seed.py services/api/tests/test_events.py -q` -> `14 passed`
+  - Local demo seed refreshed with Week 7 rules.
+  - Local live health checks passed for API `8010`, AI `8765`, web `5173`, and candidate `5174`.
 
 2026-09-20 Week 6 completion:
 

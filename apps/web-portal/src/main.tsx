@@ -204,6 +204,7 @@ function App() {
         MICROPHONE_DISABLED: { enabled: true, severity: "HIGH" },
         BACKGROUND_SPEECH: { enabled: true, severity: "MEDIUM", sustained_audio_samples: 6 },
         PHONE_DETECTED: { enabled: true, severity: "HIGH" },
+        LIVENESS_FAILED: { enabled: true, severity: "HIGH", challenge_set: ["blink", "turn_left", "turn_right"] },
         AI_ENGINE_INTERRUPTED: { enabled: true, severity: "HIGH" },
         FACE_ABSENT: { enabled: true, severity: "HIGH", absent_frame_threshold: 3 },
         MULTIPLE_PERSONS: { enabled: true, severity: "HIGH", multiple_frame_threshold: 2 },

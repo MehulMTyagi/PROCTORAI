@@ -158,6 +158,7 @@ const initialChecks: ReadinessCheck[] = [
   { key: "microphone", label: "Microphone", status: "pending", detail: "Not checked" },
   { key: "sidecar", label: "Local monitoring", status: "pending", detail: "Not checked" },
   { key: "fullscreen", label: "Fullscreen", status: "pending", detail: "Not entered" },
+  { key: "liveness", label: "Liveness", status: "pending", detail: "Not checked" },
 ];
 
 async function api<T>(path: string, options: RequestInit = {}, simulateOffline = false): Promise<T> {
@@ -263,7 +264,12 @@ function App() {
   const flushingRef = useRef(false);
   const autoEventRef = useRef<Record<string, number>>({});
   const audioSignalRef = useRef({ consecutiveLoudSamples: 0, lastSentAt: 0 });
-  const objectSignalRef = useRef({ consecutivePhoneSamples: 0, lastSentAt: 0, analyzing: false });
+  const objectSignalRef = useRef({
+    consecutivePhoneSamples: 0,
+    consecutiveClearSamples: 0,
+    activePhoneEventId: null as string | null,
+    analyzing: false,
+  });
   const readinessRef = useRef({ consentAccepted, readinessChecks });
   readinessRef.current = { consentAccepted, readinessChecks };
 
@@ -425,6 +431,7 @@ function App() {
       "FACE_ABSENT",
       "MULTIPLE_PERSONS",
       "PHONE_DETECTED",
+      "LIVENESS_FAILED",
       "CAMERA_DISABLED",
       "BACKGROUND_SPEECH",
       "AI_ENGINE_INTERRUPTED",
@@ -530,14 +537,14 @@ function App() {
     priorityScore = 5,
     automatic = false,
     snapshotDataUrl?: string | null,
-  ) {
+  ): Promise<IntegrityEvent | null> {
     if (!attempt || isSubmitted || !session) {
       if (!automatic) setError("Start the assessment attempt before sending a monitoring event.");
-      return;
+      return null;
     }
 
     const now = Date.now();
-    if (automatic && now - (autoEventRef.current[eventType] ?? 0) < 5000) return;
+    if (automatic && now - (autoEventRef.current[eventType] ?? 0) < 5000) return null;
     autoEventRef.current[eventType] = now;
     const capturedAt = new Date().toISOString();
     const snapshot = snapshotDataUrl ?? captureFrameDataUrl();
@@ -593,6 +600,7 @@ function App() {
       setLastEvent(event);
       if (captureClip) void uploadEvidenceClip(event, capturedAt);
       if (!simulateOffline) setStatus("ready");
+      return event;
     } catch (nextError) {
       if (shouldQueueOperation(nextError)) {
         enqueueOperation(operation);
@@ -600,6 +608,7 @@ function App() {
         setStatus("error");
         setError(errorMessage(nextError, "Monitoring event failed."));
       }
+      return null;
     }
   }
 
@@ -766,6 +775,12 @@ function App() {
       objectSignalRef.current.consecutivePhoneSamples = phone
         ? objectSignalRef.current.consecutivePhoneSamples + 1
         : 0;
+      objectSignalRef.current.consecutiveClearSamples = phone
+        ? 0
+        : objectSignalRef.current.consecutiveClearSamples + 1;
+      if (!phone && objectSignalRef.current.consecutiveClearSamples >= 3) {
+        objectSignalRef.current.activePhoneEventId = null;
+      }
 
       setObjectMonitor({
         status: phone ? "candidate" : "scanning",
@@ -781,10 +796,9 @@ function App() {
       if (
         phone &&
         objectSignalRef.current.consecutivePhoneSamples >= 2 &&
-        Date.now() - objectSignalRef.current.lastSentAt > 12000
+        !objectSignalRef.current.activePhoneEventId
       ) {
-        objectSignalRef.current.lastSentAt = Date.now();
-        await sendIntegrityEvent(
+        const event = await sendIntegrityEvent(
           "PHONE_DETECTED",
           {
             ...analysis.events[0]?.metadata,
@@ -808,6 +822,7 @@ function App() {
           true,
           frameDataUrl,
         );
+        if (event) objectSignalRef.current.activePhoneEventId = event.id;
         setObjectMonitor((current) => ({ ...current, status: "event", detail: "Phone event sent to proctor" }));
       }
     } catch (nextError) {
@@ -860,6 +875,22 @@ function App() {
       },
       "MEDIUM",
       7,
+      false,
+    );
+  }
+
+  function sendLivenessFailedEvent() {
+    void sendIntegrityEvent(
+      "LIVENESS_FAILED",
+      {
+        source: "manual_liveness_demo",
+        detector: "active_liveness_challenge",
+        challenge: "blink_left_right",
+        reason: "challenge_not_completed",
+        review_note: "Active liveness challenge failed or could not be completed; review the evidence clip and camera proof.",
+      },
+      "HIGH",
+      9,
       false,
     );
   }
@@ -1118,6 +1149,8 @@ function App() {
       microphoneStreamRef.current = null;
       audioSignalRef.current.consecutiveLoudSamples = 0;
       objectSignalRef.current.consecutivePhoneSamples = 0;
+      objectSignalRef.current.consecutiveClearSamples = 0;
+      objectSignalRef.current.activePhoneEventId = null;
       void audioContext?.close();
     };
   }, [monitoringActive, session?.token, simulateOffline]);
@@ -1461,6 +1494,10 @@ function App() {
             <button onClick={sendBackgroundVoiceEvent} disabled={!monitoringActive}>
               <Volume2 size={17} aria-hidden="true" />
               Background Voice
+            </button>
+            <button onClick={sendLivenessFailedEvent} disabled={!monitoringActive}>
+              <ScanFace size={17} aria-hidden="true" />
+              Liveness Failed
             </button>
           </div>
           <span>Object Monitor</span>
