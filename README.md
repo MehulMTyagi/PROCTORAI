@@ -202,11 +202,11 @@ Current Vercel demo URLs:
 - Examiner/proctor portal: `https://web-portal-six-kappa.vercel.app`
 - Candidate portal: `https://candidate-desktop.vercel.app`
 
-These deployments are currently wired to temporary LocalTunnel URLs for the local ProctorAI API and AI sidecar:
+These deployments are currently wired to temporary Cloudflare Tunnel URLs for the local ProctorAI API and AI sidecar:
 
-- API tunnel: `https://wicked-mayfly-44.loca.lt`
-- AI sidecar tunnel: `https://gentle-deer-46.loca.lt`
+- API tunnel: `https://covered-partial-raised-fifteen.trycloudflare.com`
+- AI sidecar tunnel: `https://settlement-issues-iso-observed.trycloudflare.com`
 
-The public demo works across devices while the local API, AI sidecar, and tunnel sessions remain running on this development machine. For a permanent deployment, replace the tunnel setup with a hosted backend and cloud PostgreSQL database, then redeploy both portals with `VITE_API_BASE_URL` and `VITE_AI_ENGINE_URL` pointing to durable HTTPS services.
+The public demo works across devices while the local API, AI sidecar, and tunnel sessions remain running on this development machine. The current demo API is using a seeded local SQLite database because Docker Desktop/PostgreSQL was unavailable in this shell. For a permanent deployment, replace the tunnel setup with a hosted backend and cloud PostgreSQL database, then redeploy both portals with `VITE_API_BASE_URL` and `VITE_AI_ENGINE_URL` pointing to durable HTTPS services.
 
 Next task: build the Week 6 rolling evidence pipeline with bounded local media buffering, clip generation, hashing, upload metadata, protected playback, and cleanup behavior.

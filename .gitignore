@@ -28,6 +28,7 @@ data/
 output/
 *.log
 .playwright-cli/
+.tools/
 
 # Evidence and model binaries
 *.mp4

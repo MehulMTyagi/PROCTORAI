@@ -1,6 +1,6 @@
 # ProctorAI Chat Context
 
-Last updated: 2026-09-14
+Last updated: 2026-09-20
 
 ## Standing Instruction
 
@@ -61,6 +61,34 @@ Seed users:
 - `examiner@example.com / password123`
 
 ## Latest Stabilization Pass
+
+2026-09-20 deployed portal connectivity repair:
+
+- User reported both portals still disconnected:
+  - Candidate showed `Unable to connect to your assessment service`.
+  - Web/proctor portal showed `Failed to fetch`.
+- Root cause was the backend data path, not the React bundles:
+  - Local API `/health` can run without a database, but `/auth/login` hung when Docker/PostgreSQL was unavailable.
+  - Docker Desktop UI processes were present, but the Docker engine / `dockerDesktopLinuxEngine` pipe was unavailable and the shell could not start `com.docker.service` without elevated Windows permissions.
+- Restored the public demo by running the API against a seeded local SQLite DB:
+  - Demo DB: `output/proctorai-demo-live.db`
+  - Runtime `DATABASE_URL`: `sqlite+pysqlite:///C:/git/PROCTORAI/output/proctorai-demo-live.db`
+  - API process: `http://127.0.0.1:8010`
+  - AI/YOLO sidecar process: `http://127.0.0.1:8765`
+- Replaced flaky LocalTunnel URLs with Cloudflare quick tunnels:
+  - API: `https://covered-partial-raised-fifteen.trycloudflare.com`
+  - AI sidecar: `https://settlement-issues-iso-observed.trycloudflare.com`
+- Redeployed production Vercel aliases with those URLs:
+  - Web/proctor portal: `https://web-portal-six-kappa.vercel.app`
+  - Candidate portal: `https://candidate-desktop.vercel.app`
+- Verification:
+  - Public API health returned OK through the Cloudflare API tunnel.
+  - Public AI health returned OK through the Cloudflare AI tunnel and reported `ultralytics-yolo`.
+  - Browser-style CORS preflight passed for `https://candidate-desktop.vercel.app`.
+  - Public API login and candidate assessment listing passed through the tunnel.
+  - Public AI `/detect-objects` smoke returned a `PHONE_DETECTED` event candidate with `detector=ultralytics-yolo`.
+  - Public candidate-to-proctor event smoke created a `PHONE_DETECTED` event through the API tunnel; proctor listing saw the same event with `evidence_status=READY` and `detector=ultralytics-yolo`.
+- Important limitation: Cloudflare quick tunnels and the SQLite demo DB are still local-machine dependent. If this machine, the API/AI processes, or tunnel processes stop, the deployed portals will go offline again. Durable multi-device use still needs a hosted API and managed Postgres.
 
 2026-09-15 YOLO phone detection migration:
 
