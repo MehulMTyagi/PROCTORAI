@@ -128,9 +128,19 @@ Week 2 verification:
 
 Local development URLs:
 
-- API: `http://127.0.0.1:8000`
+- API: `http://127.0.0.1:8010`
 - Proctor portal: `http://127.0.0.1:5173`
 - Candidate shell: `http://127.0.0.1:5174`
+
+If Docker/PostgreSQL is unavailable locally, start the API with:
+
+```powershell
+$env:PYTHONPATH="C:\git\PROCTORAI\services\api"
+$env:DATABASE_URL="sqlite+pysqlite:///C:/git/PROCTORAI/services/api/data/proctorai-local.db"
+python -m alembic upgrade head
+python -m app.db.seed
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
+```
 
 Week 3 is complete: examiner assessment setup, question management, candidate/proctor assignments, rule editing, candidate assessment runner, attempt start/save/submit, and basic objective scoring are in place.
 

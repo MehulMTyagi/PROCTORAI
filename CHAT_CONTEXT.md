@@ -64,6 +64,18 @@ Seed users:
 
 ## Latest Stabilization Pass
 
+2026-10-01 local connection fix:
+
+- Candidate showed "Unable to connect to your assessment service" while all local services were healthy.
+- Root cause: web and candidate frontends defaulted `VITE_API_BASE_URL` to `http://127.0.0.1:8000`, but the active ProctorAI API runs on `http://127.0.0.1:8010` because port `8000` may be occupied by another local FastAPI app.
+- Updated both frontend defaults and `.env.example` to use `http://127.0.0.1:8010`.
+- Docker/PostgreSQL was unavailable, so the local API was restarted against SQLite:
+  - `DATABASE_URL=sqlite+pysqlite:///C:/git/PROCTORAI/services/api/data/proctorai-local.db`
+  - ran `python -m alembic upgrade head`
+  - ran `python -m app.db.seed`
+- Verified candidate login and assigned assessment loading through `http://127.0.0.1:8010`.
+- Local live health checks passed for API `8010`, AI `8765`, web `5173`, and candidate `5174`.
+
 2026-09-20 liveness reliability pass:
 
 - Fixed false failures in the active liveness setup by adding frame-to-frame motion scoring to the AI sidecar verifier.

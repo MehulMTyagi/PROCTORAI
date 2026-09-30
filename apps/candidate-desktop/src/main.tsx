@@ -22,7 +22,7 @@ import {
 import "./styles.css";
 import Preflight, { type LivenessSample, type ReadinessCheck, type ReadinessKey, type CheckStatus } from "./Preflight";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8010";
 const AI_ENGINE_BASE = import.meta.env.VITE_AI_ENGINE_URL ?? "http://127.0.0.1:8765";
 const TUNNEL_BYPASS_HEADERS = { "bypass-tunnel-reminder": "1" };
 const PRE_ROLL_MS = 5000;
