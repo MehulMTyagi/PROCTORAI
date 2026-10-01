@@ -1,6 +1,6 @@
 # ProctorAI Chat Context
 
-Last updated: 2026-09-20
+Last updated: 2026-10-01
 
 ## Standing Instruction
 
@@ -16,7 +16,7 @@ Core architecture:
 
 - Candidate desktop app: Tauri 2, React, TypeScript.
 - Web portal: React, TypeScript, Vite, shared examiner/proctor role switch.
-- Backend API: FastAPI, SQLAlchemy, Alembic, PostgreSQL.
+- Backend API: FastAPI, SQLAlchemy, Alembic. Reliable local mode uses SQLite; hosted/production mode can use PostgreSQL.
 - AI sidecar: local-only FastAPI service using OpenCV.
 - Evidence model: event-driven, privacy-aware evidence capture. Normal camera/audio should stay local unless an integrity event requires evidence.
 
@@ -51,10 +51,18 @@ Expected development URLs:
 - Web portal: `http://127.0.0.1:5173`
 - Candidate runner: `http://127.0.0.1:5174`
 
-Docker:
+Reliable local commands:
 
-- PostgreSQL service: `proctorai-postgres`
-- Docker CLI may need this shell PATH prefix on Windows: `C:\Program Files\Docker\Docker\resources\bin`
+- Start everything: `npm run local:start`
+- Stop everything: `npm run local:stop`
+- Check health/login/assessment loading: `npm run local:check`
+- Local SQLite DB: `services/api/data/proctorai-local.db`
+- Runtime logs: `data/logs`
+
+Docker/PostgreSQL:
+
+- No longer required for local development.
+- PostgreSQL service name, when available: `proctorai-postgres`
 
 Seed users:
 
@@ -63,6 +71,22 @@ Seed users:
 - `examiner@example.com / password123`
 
 ## Latest Stabilization Pass
+
+2026-10-01 reliable local mode:
+
+- User reported the current setup was unreliable with recurring service errors.
+- Switched local development to a SQLite-first runner instead of relying on Docker/PostgreSQL availability.
+- Added:
+  - `scripts/start-local.ps1`
+  - `scripts/stop-local.ps1`
+  - `scripts/check-local.ps1`
+  - root npm scripts `local:start`, `local:stop`, and `local:check`
+- `npm run local:start` clears the known ports, migrates/seeds SQLite, launches API, AI sidecar, web portal, and candidate portal with fixed env vars, then runs smoke checks.
+- Keep using ports:
+  - API `8010`
+  - AI `8765`
+  - Web `5173`
+  - Candidate `5174`
 
 2026-10-01 local connection fix:
 

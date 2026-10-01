@@ -6,6 +6,9 @@
     "apps/*"
   ],
   "scripts": {
+    "local:start": "powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1",
+    "local:stop": "powershell -ExecutionPolicy Bypass -File scripts/stop-local.ps1",
+    "local:check": "powershell -ExecutionPolicy Bypass -File scripts/check-local.ps1",
     "dev:web": "npm --workspace @proctorai/web-portal run dev",
     "dev:candidate": "npm --workspace @proctorai/candidate-desktop run dev",
     "build:web": "npm --workspace @proctorai/web-portal run build",

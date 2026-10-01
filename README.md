@@ -132,15 +132,13 @@ Local development URLs:
 - Proctor portal: `http://127.0.0.1:5173`
 - Candidate shell: `http://127.0.0.1:5174`
 
-If Docker/PostgreSQL is unavailable locally, start the API with:
+Reliable local mode uses SQLite instead of Docker/PostgreSQL. Start everything with:
 
 ```powershell
-$env:PYTHONPATH="C:\git\PROCTORAI\services\api"
-$env:DATABASE_URL="sqlite+pysqlite:///C:/git/PROCTORAI/services/api/data/proctorai-local.db"
-python -m alembic upgrade head
-python -m app.db.seed
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
+npm run local:start
 ```
+
+This clears ports `8010`, `8765`, `5173`, and `5174`, migrates and seeds `services/api/data/proctorai-local.db`, starts the API, AI sidecar, web portal, and candidate portal, then runs a health/login smoke check. Stop the stack with `npm run local:stop`; verify it with `npm run local:check`.
 
 Week 3 is complete: examiner assessment setup, question management, candidate/proctor assignments, rule editing, candidate assessment runner, attempt start/save/submit, and basic objective scoring are in place.
 
