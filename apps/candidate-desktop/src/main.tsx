@@ -1,150 +1,83 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  ArrowLeft,
-  Camera,
-  CheckCircle2,
-  Expand,
-  MonitorUp,
-  Radio,
-  RotateCw,
-  Save,
-  ScanFace,
-  Send,
+  BookOpen,
+  CircleHelp,
+  LayoutDashboard,
   ShieldCheck,
-  Smartphone,
-  UserRoundX,
-  UsersRound,
-  Volume2,
   Wifi,
   WifiOff,
 } from "lucide-react";
 import "./styles.css";
-import Preflight, { type LivenessSample, type ReadinessCheck, type ReadinessKey, type CheckStatus } from "./Preflight";
+import "./portal.css";
+import "./legibility.css";
+import AssessmentsPage from "./AssessmentsPage";
+import SetupPage from "./SetupPage";
+import TestPage from "./TestPage";
+import { CandidateHelp, CandidateHome } from "./PortalPages";
+import { RollingEvidenceRecorder } from "./evidenceRecorder";
+import { enabled, requiredCheck, requirements } from "./proctoring";
+import {
+  parseRoute,
+  routeHash,
+  type AiFrameResponse,
+  type AiModelInfo,
+  type Answer,
+  type Assessment,
+  type AssessmentDetail,
+  type Attempt,
+  type CheckStatus,
+  type EvidenceFile,
+  type IntegrityEvent,
+  type LivenessResponse,
+  type LivenessSample,
+  type PendingOperation,
+  type Question,
+  type ReadinessCheck,
+  type ReadinessKey,
+  type RiskTimelineItem,
+  type Route,
+  type Session,
+  type YoloObjectResponse,
+} from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8010";
-const AI_ENGINE_BASE = import.meta.env.VITE_AI_ENGINE_URL ?? "http://127.0.0.1:8765";
+const AI_ENGINE_BASE =
+  import.meta.env.VITE_AI_ENGINE_URL ?? "http://127.0.0.1:8765";
 const TUNNEL_BYPASS_HEADERS = { "bypass-tunnel-reminder": "1" };
 const PRE_ROLL_MS = 5000;
 const POST_ROLL_MS = 5000;
-const RECORDER_TIMESLICE_MS = 1000;
 
-type User = { id: string; email: string; full_name: string; role: string };
-type Assessment = {
-  id: string;
-  title: string;
-  description: string | null;
-  status: string;
-  duration_minutes: number | null;
+const RISK_WINDOW_MS = 30_000;
+const RISK_WEIGHTS: Record<string, number> = {
+  APP_FOCUS_LOST: 5,
+  FULLSCREEN_EXIT: 8,
+  HEARTBEAT_GAP: 9,
+  CAMERA_DISABLED: 9,
+  MICROPHONE_DISABLED: 8,
+  BACKGROUND_SPEECH: 7,
+  PHONE_DETECTED: 12,
+  LIVENESS_FAILED: 10,
+  FACE_ABSENT: 8,
+  MULTIPLE_PERSONS: 11,
+  AI_ENGINE_INTERRUPTED: 8,
+  CLIPBOARD_COPY: 5,
+  CLIPBOARD_CUT: 6,
+  CLIPBOARD_PASTE: 7,
+  PRINT_SCREEN_ATTEMPT: 7,
+  DEVTOOLS_SHORTCUT: 6,
+  SCREEN_SHARE_ATTEMPT: 8,
 };
-type Question = {
-  id: string;
-  prompt: string;
-  question_type: string;
-  options: { id: string; label: string }[] | null;
-  correct_answer: string | null;
-  points: number;
-  display_order: number;
-};
-type AssessmentDetail = Assessment & { questions: Question[] };
-type Attempt = {
-  id: string;
-  assessment_id: string;
-  status: string;
-  score: number | null;
-  answers: Answer[];
-};
-type Answer = {
-  id: string;
-  question_id: string;
-  answer_text: string | null;
-  selected_option: string | null;
-  score_awarded: number | null;
-};
-type IntegrityEvent = {
-  id: string;
-  event_type: string;
-  status: string;
-  priority_score: number;
-  evidence_status: string;
-  metadata: Record<string, unknown>;
-  evidence_files: EvidenceFile[];
-};
-type EvidenceFile = {
-  id: string;
-  kind: string;
-  mime_type: string;
-  sha256_hash: string;
-  size_bytes: number;
-  duration_ms: number | null;
-  download_url: string;
-};
-type AiModelInfo = {
-  name: string;
-  version: string;
-  detector: string;
-  cascade_path?: string | null;
-  model_path?: string | null;
-};
-type AiEventCandidate = {
-  event_type: "FACE_ABSENT" | "MULTIPLE_PERSONS";
-  severity: "HIGH";
-  confidence: number;
-  priority_score: number;
-  metadata: Record<string, unknown>;
-};
-type AiFrameResponse = {
-  face_count: number;
-  state: {
-    consecutive_absent_frames: number;
-    consecutive_multiple_frames: number;
-    normal_frames: number;
-    samples_analyzed: number;
-  };
-  events: AiEventCandidate[];
-  model: AiModelInfo;
-};
-type YoloDetectedObject = {
-  class_name: string;
-  confidence: number;
-  bbox: number[];
-  phone_like: boolean;
-};
-type YoloObjectEventCandidate = {
-  event_type: "PHONE_DETECTED";
-  severity: "HIGH";
-  confidence: number;
-  priority_score: number;
-  metadata: Record<string, unknown>;
-};
-type YoloObjectResponse = {
-  objects: YoloDetectedObject[];
-  phone_like_objects: YoloDetectedObject[];
-  events: YoloObjectEventCandidate[];
-  model: AiModelInfo;
-};
-type LivenessResponse = {
-  passed: boolean;
-  confidence: number;
-  results: { prompt: string; passed: boolean; reason: string; confidence: number }[];
-  model: AiModelInfo;
-};
-type Session = { token: string; user: User };
-type PendingOperation = {
-  id: string;
-  kind: "ANSWER" | "EVENT" | "HEARTBEAT";
-  path: string;
-  method: "POST";
-  body: Record<string, unknown>;
-  label: string;
-  queued_at: string;
-  status: "queued" | "retrying" | "failed";
-};
-type RollingChunk = {
-  blob: Blob;
-  startedAt: number;
-  endedAt: number;
-};
+const BROWSER_ACTIVITY_EVENTS = [
+  "APP_FOCUS_LOST",
+  "FULLSCREEN_EXIT",
+  "CLIPBOARD_COPY",
+  "CLIPBOARD_CUT",
+  "CLIPBOARD_PASTE",
+  "PRINT_SCREEN_ATTEMPT",
+  "DEVTOOLS_SHORTCUT",
+  "SCREEN_SHARE_ATTEMPT",
+];
 
 class ApiError extends Error {
   status?: number;
@@ -159,25 +92,75 @@ class ApiError extends Error {
 }
 
 const initialChecks: ReadinessCheck[] = [
-  { key: "backend", label: "Assessment connection", status: "pending", detail: "Not checked" },
+  {
+    key: "backend",
+    label: "Assessment connection",
+    status: "pending",
+    detail: "Not checked",
+  },
   { key: "camera", label: "Camera", status: "pending", detail: "Not checked" },
-  { key: "microphone", label: "Microphone", status: "pending", detail: "Not checked" },
-  { key: "sidecar", label: "Local monitoring", status: "pending", detail: "Not checked" },
-  { key: "fullscreen", label: "Fullscreen", status: "pending", detail: "Not entered" },
-  { key: "liveness", label: "Liveness", status: "pending", detail: "Not checked" },
+  {
+    key: "microphone",
+    label: "Microphone",
+    status: "pending",
+    detail: "Not checked",
+  },
+  {
+    key: "sidecar",
+    label: "Local monitoring",
+    status: "pending",
+    detail: "Not checked",
+  },
+  {
+    key: "screen",
+    label: "Screen recording",
+    status: "pending",
+    detail: "Not checked",
+  },
+  {
+    key: "devices",
+    label: "Connected devices",
+    status: "pending",
+    detail: "Not checked",
+  },
+  {
+    key: "fullscreen",
+    label: "Fullscreen",
+    status: "pending",
+    detail: "Not entered",
+  },
+  {
+    key: "liveness",
+    label: "Liveness",
+    status: "pending",
+    detail: "Not checked",
+  },
 ];
 
-async function api<T>(path: string, options: RequestInit = {}, simulateOffline = false): Promise<T> {
-  if (simulateOffline) throw new ApiError("Simulated network offline", undefined, true);
+async function api<T>(
+  path: string,
+  options: RequestInit = {},
+  simulateOffline = false,
+): Promise<T> {
+  if (simulateOffline)
+    throw new ApiError("Simulated network offline", undefined, true);
 
   const response = await fetch(`${API_BASE}${path}`, {
     signal: AbortSignal.timeout(8000),
     ...options,
-    headers: { "Content-Type": "application/json", ...TUNNEL_BYPASS_HEADERS, ...options.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...TUNNEL_BYPASS_HEADERS,
+      ...options.headers,
+    },
   });
   if (!response.ok) {
     const message = await response.text();
-    throw new ApiError(message || `Request failed with status ${response.status}`, response.status, response.status >= 500);
+    throw new ApiError(
+      message || `Request failed with status ${response.status}`,
+      response.status,
+      response.status >= 500,
+    );
   }
   return response.json() as Promise<T>;
 }
@@ -191,10 +174,16 @@ function shouldQueueOperation(error: unknown) {
 }
 
 async function login(): Promise<Session> {
-  const auth = await api<{ access_token: string; user: User }>("/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ email: "candidate@example.com", password: "password123" }),
-  });
+  const auth = await api<{ access_token: string; user: Session["user"] }>(
+    "/auth/login",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        email: "candidate@example.com",
+        password: "password123",
+      }),
+    },
+  );
   return { token: auth.access_token, user: auth.user };
 }
 
@@ -219,16 +208,49 @@ function buildOperation(
 async function sha256Hex(input: string) {
   const bytes = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 async function sha256Blob(blob: Blob) {
-  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    await blob.arrayBuffer(),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
-function wait(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+function riskWeight(eventType: string, priorityScore: number) {
+  return RISK_WEIGHTS[eventType] ?? Math.max(2, priorityScore);
+}
+
+function riskLabel(score: number) {
+  if (score >= 70) return "Critical";
+  if (score >= 45) return "High";
+  if (score >= 20) return "Moderate";
+  return "Low";
+}
+
+function pruneRiskTimeline(items: RiskTimelineItem[], now = Date.now()) {
+  return items.filter(
+    (item) => now - new Date(item.occurredAt).getTime() <= RISK_WINDOW_MS,
+  );
+}
+
+function targetSummary(target: EventTarget | null) {
+  const element = target instanceof HTMLElement ? target : null;
+  return {
+    tag: element?.tagName ?? "UNKNOWN",
+    input_type: element instanceof HTMLInputElement ? element.type : null,
+    editable: Boolean(element?.isContentEditable),
+  };
+}
+
+function isBrowserActivityEvent(eventType: string) {
+  return BROWSER_ACTIVITY_EVENTS.includes(eventType);
 }
 
 function App() {
@@ -238,11 +260,18 @@ function App() {
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
   const [lastEvent, setLastEvent] = useState<IntegrityEvent | null>(null);
-  const [readinessChecks, setReadinessChecks] = useState<ReadinessCheck[]>(initialChecks);
+  const [readinessChecks, setReadinessChecks] =
+    useState<ReadinessCheck[]>(initialChecks);
   const [consentAccepted, setConsentAccepted] = useState(false);
-  const [consentAcceptedAt, setConsentAcceptedAt] = useState<string | null>(null);
-  const [fullscreenActive, setFullscreenActive] = useState(Boolean(document.fullscreenElement));
-  const [lastHeartbeatAckAt, setLastHeartbeatAckAt] = useState<string | null>(null);
+  const [consentAcceptedAt, setConsentAcceptedAt] = useState<string | null>(
+    null,
+  );
+  const [fullscreenActive, setFullscreenActive] = useState(
+    Boolean(document.fullscreenElement),
+  );
+  const [lastHeartbeatAckAt, setLastHeartbeatAckAt] = useState<string | null>(
+    null,
+  );
   const [heartbeatGapNotified, setHeartbeatGapNotified] = useState(false);
   const [aiModel, setAiModel] = useState<AiModelInfo | null>(null);
   const [faceMonitor, setFaceMonitor] = useState({
@@ -257,18 +286,36 @@ function App() {
     confidence: null as number | null,
     detail: "Phone detector pending",
   });
+  const [screenMonitor, setScreenMonitor] = useState({
+    status: "pending",
+    detail: "Screen recording permission pending",
+  });
+  const [riskTimeline, setRiskTimeline] = useState<RiskTimelineItem[]>([]);
   const [retryQueue, setRetryQueue] = useState<PendingOperation[]>([]);
   const [simulateOffline, setSimulateOffline] = useState(false);
   const [status, setStatus] = useState("connecting");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [route, setRoute] = useState<Route>(() =>
+    parseRoute(window.location.hash),
+  );
+  const [attemptedAssessmentIds, setAttemptedAssessmentIds] = useState<
+    string[]
+  >([]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const rollingChunksRef = useRef<RollingChunk[]>([]);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<RollingEvidenceRecorder | null>(null);
+  const screenMediaRecorderRef = useRef<RollingEvidenceRecorder | null>(null);
   const flushingRef = useRef(false);
+  const submissionPendingRef = useRef(false);
+  const pendingIntegrityRef = useRef(new Set<Promise<unknown>>());
+  const retryQueueRef = useRef(retryQueue);
+  retryQueueRef.current = retryQueue;
   const autoEventRef = useRef<Record<string, number>>({});
+  const screenCaptureRequestRef = useRef(false);
   const audioSignalRef = useRef({ consecutiveLoudSamples: 0, lastSentAt: 0 });
   const objectSignalRef = useRef({
     consecutivePhoneSamples: 0,
@@ -282,29 +329,56 @@ function App() {
   const authHeaders: Record<string, string> = session
     ? { Authorization: `Bearer ${session.token}` }
     : {};
-  const answeredCount = useMemo(
-    () => Object.values(draftAnswers).filter((answer) => answer.trim().length > 0).length,
-    [draftAnswers],
-  );
   const readinessByKey = useMemo(
-    () => Object.fromEntries(readinessChecks.map((check) => [check.key, check])),
+    () =>
+      Object.fromEntries(readinessChecks.map((check) => [check.key, check])),
     [readinessChecks],
   ) as Record<ReadinessKey, ReadinessCheck>;
-  const allChecksReady = readinessChecks.every((check) => check.status === "pass");
-  const canStartAttempt = Boolean(session && selected && consentAccepted && allChecksReady && status !== "saving");
+  const required = requirements(selected?.rules);
+  const allChecksReady = readinessChecks
+    .filter((check) => requiredCheck(check.key, selected?.rules))
+    .every((check) => check.status === "pass");
+  const canStartAttempt = Boolean(
+    session &&
+    selected &&
+    consentAccepted &&
+    allChecksReady &&
+    status !== "saving",
+  );
   const isSubmitted = attempt?.status === "SUBMITTED";
   const monitoringActive = Boolean(attempt && !isSubmitted);
   const sidecarReady = readinessByKey.sidecar?.status === "pass";
+  const liveRiskScore = useMemo(
+    () =>
+      Math.min(
+        100,
+        pruneRiskTimeline(riskTimeline).reduce(
+          (total, item) => total + item.weight,
+          0,
+        ),
+      ),
+    [riskTimeline],
+  );
+  const liveRiskLabel = riskLabel(liveRiskScore);
 
-  function updateCheck(key: ReadinessKey, nextStatus: CheckStatus, detail: string) {
+  function updateCheck(
+    key: ReadinessKey,
+    nextStatus: CheckStatus,
+    detail: string,
+  ) {
     setReadinessChecks((current) =>
-      current.map((check) => (check.key === key ? { ...check, status: nextStatus, detail } : check)),
+      current.map((check) =>
+        check.key === key ? { ...check, status: nextStatus, detail } : check,
+      ),
     );
   }
 
   function enqueueOperation(operation: PendingOperation) {
     setRetryQueue((current) => {
-      if (operation.kind === "HEARTBEAT" && current.some((queued) => queued.kind === "HEARTBEAT")) {
+      if (
+        operation.kind === "HEARTBEAT" &&
+        current.some((queued) => queued.kind === "HEARTBEAT")
+      ) {
         return current;
       }
       return [...current, operation];
@@ -312,7 +386,11 @@ function App() {
     setStatus("offline");
   }
 
-  async function executeOperation(operation: PendingOperation, token: string, honorOffline = false) {
+  async function executeOperation(
+    operation: PendingOperation,
+    token: string,
+    honorOffline = false,
+  ) {
     const result = await api<unknown>(
       operation.path,
       {
@@ -327,7 +405,9 @@ function App() {
       const answer = result as Answer;
       setAttempt((current) => {
         if (!current) return current;
-        const existing = current.answers.filter((item) => item.id !== answer.id);
+        const existing = current.answers.filter(
+          (item) => item.id !== answer.id,
+        );
         return { ...current, answers: [...existing, answer] };
       });
     }
@@ -337,84 +417,124 @@ function App() {
     }
   }
 
-  function stopRollingRecorder() {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-    }
-    mediaRecorderRef.current = null;
-    rollingChunksRef.current = [];
+  function stopRecorder(recorderRef: {
+    current: RollingEvidenceRecorder | null;
+  }) {
+    recorderRef.current?.stop();
+    recorderRef.current = null;
   }
 
-  function startRollingRecorder(stream: MediaStream) {
-    stopRollingRecorder();
+  function startRecorder(
+    stream: MediaStream,
+    recorderRef: { current: RollingEvidenceRecorder | null },
+  ) {
+    stopRecorder(recorderRef);
     if (!window.MediaRecorder) return;
-
-    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
-      ? "video/webm;codecs=vp8"
-      : "video/webm";
-
     try {
-      const recorder = new MediaRecorder(stream, { mimeType });
-      let chunkStartedAt = Date.now();
-      recorder.ondataavailable = (event) => {
-        const endedAt = Date.now();
-        if (event.data.size > 0) {
-          rollingChunksRef.current = [
-            ...rollingChunksRef.current,
-            { blob: event.data, startedAt: chunkStartedAt, endedAt },
-          ].filter((chunk) => chunk.endedAt >= endedAt - PRE_ROLL_MS - RECORDER_TIMESLICE_MS);
-        }
-        chunkStartedAt = endedAt;
-      };
-      recorder.start(RECORDER_TIMESLICE_MS);
-      mediaRecorderRef.current = recorder;
+      recorderRef.current = new RollingEvidenceRecorder(
+        stream,
+        PRE_ROLL_MS,
+        POST_ROLL_MS,
+      );
     } catch {
-      mediaRecorderRef.current = null;
-      rollingChunksRef.current = [];
+      recorderRef.current = null;
     }
+  }
+
+  function stopRollingRecorder() {
+    stopRecorder(mediaRecorderRef);
+  }
+  function startRollingRecorder(stream: MediaStream) {
+    startRecorder(stream, mediaRecorderRef);
+  }
+  function stopScreenRecorder() {
+    stopRecorder(screenMediaRecorderRef);
+  }
+  function startScreenRecorder(stream: MediaStream) {
+    startRecorder(stream, screenMediaRecorderRef);
+  }
+
+  function stopScreenCapture() {
+    screenStreamRef.current?.getVideoTracks().forEach((track) => {
+      track.onended = null;
+    });
+    screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+    screenStreamRef.current = null;
+    stopScreenRecorder();
+    screenCaptureRequestRef.current = false;
+    setScreenMonitor({
+      status: "pending",
+      detail: "Screen recording permission pending",
+    });
   }
 
   async function uploadEvidenceClip(event: IntegrityEvent, capturedAt: string) {
     if (!attempt || !session || simulateOffline) return;
-
-    const eventTime = new Date(capturedAt).getTime();
-    const captureStart = eventTime - PRE_ROLL_MS;
-    const captureEnd = eventTime + POST_ROLL_MS;
-    await wait(POST_ROLL_MS);
-
-    const chunks = rollingChunksRef.current.filter(
-      (chunk) => chunk.endedAt >= captureStart && chunk.startedAt <= captureEnd,
-    );
-
+    const useScreenRecording = isBrowserActivityEvent(event.event_type);
+    const recorder = useScreenRecording
+      ? screenMediaRecorderRef.current
+      : mediaRecorderRef.current;
     try {
-      if (chunks.length === 0) throw new Error("No rolling media chunks were available for this event.");
-      const mimeType = chunks[0]?.blob.type || "video/webm";
-      const clip = new Blob(chunks.map((chunk) => chunk.blob), { type: mimeType });
+      if (!recorder) throw new Error("The evidence recorder is not available.");
+      const captured = await recorder.capture(new Date(capturedAt).getTime());
+      const clip = captured.blob;
+      const mimeType = clip.type || "video/webm";
       const sha256_hash = await sha256Blob(clip);
       const formData = new FormData();
-      formData.set("file", new File([clip], `${event.event_type.toLowerCase()}-${event.id}.webm`, { type: mimeType }));
-      formData.set("kind", "VIDEO");
+      formData.set(
+        "file",
+        new File(
+          [clip],
+          event.event_type.toLowerCase() + "-" + event.id + ".webm",
+          { type: mimeType },
+        ),
+      );
+      formData.set("kind", useScreenRecording ? "SCREEN_RECORDING" : "VIDEO");
       formData.set("sha256_hash", sha256_hash);
-      formData.set("duration_ms", String(captureEnd - captureStart));
-      formData.set("captured_start_at", new Date(captureStart).toISOString());
-      formData.set("captured_end_at", new Date(captureEnd).toISOString());
-
-      const response = await fetch(`${API_BASE}/attempts/${attempt.id}/events/${event.id}/evidence`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.token}`, ...TUNNEL_BYPASS_HEADERS },
-        body: formData,
-      });
+      formData.set(
+        "duration_ms",
+        String(captured.endedAt - captured.startedAt),
+      );
+      formData.set(
+        "captured_start_at",
+        new Date(captured.startedAt).toISOString(),
+      );
+      formData.set("captured_end_at", new Date(captured.endedAt).toISOString());
+      const response = await fetch(
+        API_BASE +
+          "/attempts/" +
+          attempt.id +
+          "/events/" +
+          event.id +
+          "/evidence",
+        {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + session.token,
+            ...TUNNEL_BYPASS_HEADERS,
+          },
+          body: formData,
+        },
+      );
       if (!response.ok) throw new Error(await response.text());
-      const evidenceFile = await response.json() as EvidenceFile;
+      const evidenceFile = (await response.json()) as EvidenceFile;
       setLastEvent((current) =>
         current?.id === event.id
-          ? { ...current, evidence_status: "READY", evidence_files: [...current.evidence_files, evidenceFile] }
+          ? {
+              ...current,
+              evidence_status: "READY",
+              evidence_files: [...current.evidence_files, evidenceFile],
+            }
           : current,
       );
     } catch (nextError) {
       try {
         const response = await api<IntegrityEvent>(
-          `/attempts/${attempt.id}/events/${event.id}/evidence/failure`,
+          "/attempts/" +
+            attempt.id +
+            "/events/" +
+            event.id +
+            "/evidence/failure",
           {
             method: "POST",
             headers: authHeaders,
@@ -427,25 +547,55 @@ function App() {
         );
         setLastEvent(response);
       } catch {
-        setLastEvent((current) => current?.id === event.id ? { ...current, evidence_status: "FAILED" } : current);
+        setLastEvent((current) =>
+          current?.id === event.id
+            ? { ...current, evidence_status: "FAILED" }
+            : current,
+        );
       }
     }
   }
 
   function shouldCaptureClip(eventType: string, snapshot: string | null) {
-    return Boolean(snapshot && mediaRecorderRef.current && [
-      "FACE_ABSENT",
-      "MULTIPLE_PERSONS",
-      "PHONE_DETECTED",
-      "LIVENESS_FAILED",
-      "CAMERA_DISABLED",
-      "BACKGROUND_SPEECH",
-      "AI_ENGINE_INTERRUPTED",
-    ].includes(eventType));
+    if (isBrowserActivityEvent(eventType)) {
+      return Boolean(
+        screenMediaRecorderRef.current &&
+        [
+          "APP_FOCUS_LOST",
+          "FULLSCREEN_EXIT",
+          "CLIPBOARD_COPY",
+          "CLIPBOARD_CUT",
+          "CLIPBOARD_PASTE",
+          "PRINT_SCREEN_ATTEMPT",
+          "DEVTOOLS_SHORTCUT",
+          "SCREEN_SHARE_ATTEMPT",
+        ].includes(eventType),
+      );
+    }
+
+    return Boolean(
+      snapshot &&
+      mediaRecorderRef.current &&
+      [
+        "FACE_ABSENT",
+        "MULTIPLE_PERSONS",
+        "PHONE_DETECTED",
+        "LIVENESS_FAILED",
+        "CAMERA_DISABLED",
+        "BACKGROUND_SPEECH",
+        "AI_ENGINE_INTERRUPTED",
+      ].includes(eventType),
+    );
   }
 
   async function flushQueue() {
-    if (!session || simulateOffline || flushingRef.current || retryQueue.length === 0) return;
+    if (
+      !session ||
+      simulateOffline ||
+      flushingRef.current ||
+      retryQueue.length === 0
+    )
+      return;
     flushingRef.current = true;
     setStatus("syncing");
     setError(null);
@@ -454,17 +604,23 @@ function App() {
     for (const operation of retryQueue) {
       setRetryQueue((current) =>
         current.map((queued) =>
-          queued.id === operation.id ? { ...queued, status: "retrying" } : queued,
+          queued.id === operation.id
+            ? { ...queued, status: "retrying" }
+            : queued,
         ),
       );
       try {
         await executeOperation(operation, session.token);
-        setRetryQueue((current) => current.filter((queued) => queued.id !== operation.id));
+        setRetryQueue((current) =>
+          current.filter((queued) => queued.id !== operation.id),
+        );
       } catch (nextError) {
         failedOperation = operation;
         setRetryQueue((current) =>
           current.map((queued) =>
-            queued.id === operation.id ? { ...queued, status: "failed" } : queued,
+            queued.id === operation.id
+              ? { ...queued, status: "failed" }
+              : queued,
           ),
         );
         setError(errorMessage(nextError, `${operation.label} sync failed.`));
@@ -481,7 +637,6 @@ function App() {
       headers: { Authorization: `Bearer ${token}` },
     });
     setAssessments(list);
-    if (list[0]) await loadAssessment(list[0].id, token);
   }
 
   async function loadAssessment(assessmentId: string, token = session?.token) {
@@ -489,9 +644,12 @@ function App() {
     setStatus("loading");
     setError(null);
     try {
-      const detail = await api<AssessmentDetail>(`/assessments/${assessmentId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const detail = await api<AssessmentDetail>(
+        `/assessments/${assessmentId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
       setSelected(detail);
       setAttempt(null);
       setConsentAccepted(false);
@@ -499,10 +657,17 @@ function App() {
       setReadinessChecks(initialChecks);
       setDraftAnswers({});
       setLastEvent(null);
+      setRiskTimeline([]);
+      stopScreenCapture();
       setStatus("ready");
     } catch (nextError) {
       setStatus("error");
-      setError(errorMessage(nextError, "Assessment could not be loaded. Please retry."));
+      setError(
+        errorMessage(
+          nextError,
+          "Assessment could not be loaded. Please retry.",
+        ),
+      );
     }
   }
 
@@ -517,48 +682,169 @@ function App() {
     } catch {
       setSession(null);
       setStatus("error");
-      setError("Unable to connect to your assessment service. Please reconnect when the service is available.");
+      setError(
+        "Unable to connect to your assessment service. Please reconnect when the service is available.",
+      );
     }
   }
 
-  useEffect(() => { void connect(); }, []);
+  useEffect(() => {
+    void connect();
+  }, []);
+
+  const activeAttempt =
+    attempt && attempt.status !== "SUBMITTED" ? attempt : null;
 
   useEffect(() => {
-    if (!attempt) return;
-    const syncRoute = () => {
-      window.history.replaceState(null, "", isSubmitted ? "#/submitted" : "#/exam");
-    };
-    syncRoute();
-    document.title = `${isSubmitted ? "Submitted" : "Assessment"} | ProctorAI Candidate`;
     document.getElementById("main-content")?.focus();
     window.scrollTo(0, 0);
-    window.addEventListener("hashchange", syncRoute);
-    return () => window.removeEventListener("hashchange", syncRoute);
-  }, [attempt?.id, isSubmitted]);
+  }, [route.name]);
 
-  async function sendIntegrityEvent(
+  useEffect(() => {
+    const sync = () => setRoute(parseRoute(window.location.hash));
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    if (activeAttempt) {
+      if (
+        route.name !== "test" ||
+        route.assessmentId !== activeAttempt.assessment_id
+      ) {
+        window.history.replaceState(
+          null,
+          "",
+          routeHash({
+            name: "test",
+            assessmentId: activeAttempt.assessment_id,
+          }),
+        );
+        setRoute({ name: "test", assessmentId: activeAttempt.assessment_id });
+      }
+      return;
+    }
+    if (route.name === "test" && !attempt) {
+      window.history.replaceState(
+        null,
+        "",
+        routeHash({ name: "setup", assessmentId: route.assessmentId }),
+      );
+      setRoute({ name: "setup", assessmentId: route.assessmentId });
+    }
+  }, [activeAttempt, route, session]);
+
+  useEffect(() => {
+    if (!session || activeAttempt) return;
+    const setupId =
+      route.name === "setup" || route.name === "test"
+        ? route.assessmentId
+        : null;
+    if (!setupId || selected?.id === setupId) return;
+    void loadAssessment(setupId);
+  }, [session, activeAttempt, route, selected?.id]);
+
+  useEffect(() => {
+    if (attempt) {
+      document.getElementById("main-content")?.focus();
+      window.scrollTo(0, 0);
+    }
+  }, [attempt?.id]);
+
+  useEffect(() => {
+    if (attempt) {
+      document.title = `${attempt.status === "SUBMITTED" ? "Submitted" : (selected?.title ?? "Assessment")} | ProctorAI Candidate`;
+    } else if (route.name === "assessments") {
+      document.title = `Your assessments | ProctorAI Candidate`;
+    } else if (route.name === "home" || route.name === "help") {
+      document.title = `${route.name === "home" ? "Dashboard" : "Help & guidance"} | ProctorAI Candidate`;
+    } else {
+      document.title = `Assessment setup | ProctorAI Candidate`;
+    }
+  }, [attempt?.id, attempt?.status, route.name, selected?.title]);
+
+  useEffect(() => {
+    if (isSubmitted) {
+      stopScreenCapture();
+    }
+  }, [isSubmitted]);
+
+  function trackIntegrityTask<T>(task: Promise<T>): Promise<T> {
+    pendingIntegrityRef.current.add(task);
+    void task.then(
+      () => pendingIntegrityRef.current.delete(task),
+      () => pendingIntegrityRef.current.delete(task),
+    );
+    return task;
+  }
+
+  function sendIntegrityEvent(
+    ...args: Parameters<typeof performIntegrityEvent>
+  ) {
+    if (
+      submissionPendingRef.current ||
+      !enabled(selected?.rules, args[0] ?? "APP_FOCUS_LOST")
+    )
+      return Promise.resolve(null);
+    return trackIntegrityTask(performIntegrityEvent(...args));
+  }
+
+  async function performIntegrityEvent(
     eventType = "APP_FOCUS_LOST",
-    metadata: Record<string, unknown> = { source: "candidate-week5-runner", reason: "manual_dummy_event" },
+    metadata: Record<string, unknown> = {
+      source: "candidate-week5-runner",
+      reason: "manual_dummy_event",
+    },
     severity = "MEDIUM",
     priorityScore = 5,
     automatic = false,
     snapshotDataUrl?: string | null,
   ): Promise<IntegrityEvent | null> {
     if (!attempt || isSubmitted || !session) {
-      if (!automatic) setError("Start the assessment attempt before sending a monitoring event.");
+      if (!automatic)
+        setError(
+          "Start the assessment attempt before sending a monitoring event.",
+        );
       return null;
     }
 
     const now = Date.now();
-    if (automatic && now - (autoEventRef.current[eventType] ?? 0) < 5000) return null;
+    if (automatic && now - (autoEventRef.current[eventType] ?? 0) < 5000)
+      return null;
     autoEventRef.current[eventType] = now;
     const capturedAt = new Date().toISOString();
-    const snapshot = snapshotDataUrl ?? captureFrameDataUrl();
+    const weight = riskWeight(eventType, priorityScore);
+    const recentRiskItems = pruneRiskTimeline(riskTimeline, now);
+    const nextRiskScore = Math.min(
+      100,
+      recentRiskItems.reduce((total, item) => total + item.weight, 0) + weight,
+    );
+    const riskItem: RiskTimelineItem = {
+      id: crypto.randomUUID(),
+      eventType,
+      weight,
+      occurredAt: capturedAt,
+      source: String(metadata.source ?? "candidate-monitor"),
+    };
+    setRiskTimeline([...recentRiskItems, riskItem].slice(-30));
+    const snapshot = isBrowserActivityEvent(eventType)
+      ? null
+      : (snapshotDataUrl ?? captureFrameDataUrl());
     const captureClip = shouldCaptureClip(eventType, snapshot);
+    const proofKind = captureClip
+      ? isBrowserActivityEvent(eventType)
+        ? "SCREEN_RECORDING_CLIP"
+        : "ROLLING_CLIP"
+      : snapshot
+        ? "CAMERA_SNAPSHOT"
+        : "SESSION_LOG";
     const proof = {
-      kind: captureClip ? "ROLLING_CLIP" : snapshot ? "CAMERA_SNAPSHOT" : "SESSION_LOG",
+      kind: proofKind,
       captured_at: capturedAt,
       source: metadata.source ?? "candidate-monitor",
+      evidence_source: isBrowserActivityEvent(eventType) ? "screen" : "camera",
+      screen_recording_active: Boolean(screenMediaRecorderRef.current),
       page_hidden: document.hidden,
       fullscreen_active: Boolean(document.fullscreenElement),
       viewport: { width: window.innerWidth, height: window.innerHeight },
@@ -572,7 +858,9 @@ function App() {
         : null,
       review_note: snapshot
         ? captureClip
-          ? "Rolling evidence clip captured locally with pre/post context around the signal."
+          ? isBrowserActivityEvent(eventType)
+            ? "Screen-recording clip captured locally with pre/post context around the browser activity signal."
+            : "Rolling evidence clip captured locally with pre/post context around the signal."
           : "Camera snapshot captured locally at the time of the signal."
         : "Browser/session state captured at the time of the signal.",
     };
@@ -587,7 +875,19 @@ function App() {
         priority_score: priorityScore,
         occurred_at: capturedAt,
         evidence_status: captureClip ? "PENDING" : "READY",
-        metadata: { ...metadata, automatic, queued_from: "candidate-week6-runner", proof },
+        metadata: {
+          ...metadata,
+          automatic,
+          queued_from: "candidate-production-runner",
+          risk: {
+            score: nextRiskScore,
+            label: riskLabel(nextRiskScore),
+            weight,
+            window_ms: RISK_WINDOW_MS,
+            timeline_size: recentRiskItems.length + 1,
+          },
+          proof,
+        },
       },
       eventType.replaceAll("_", " "),
     );
@@ -604,7 +904,8 @@ function App() {
         simulateOffline,
       );
       setLastEvent(event);
-      if (captureClip) void uploadEvidenceClip(event, capturedAt);
+      if (captureClip)
+        void trackIntegrityTask(uploadEvidenceClip(event, capturedAt));
       if (!simulateOffline) setStatus("ready");
       return event;
     } catch (nextError) {
@@ -627,17 +928,30 @@ function App() {
         signal: controller.signal,
       });
       if (!response.ok) throw new Error(`Sidecar returned ${response.status}`);
-      const health = (await response.json()) as { status: string; model: AiModelInfo };
+      const health = (await response.json()) as {
+        status: string;
+        model: AiModelInfo;
+      };
       setAiModel(health.model);
       setFaceMonitor((current) => ({
         ...current,
         detail: `${health.model.detector} ready`,
       }));
-      updateCheck("sidecar", health.status === "ok" ? "pass" : "fail", health.status === "ok" ? "Local monitoring is available" : "Local monitoring is not ready. Restart the service and retry.");
+      updateCheck(
+        "sidecar",
+        health.status === "ok" ? "pass" : "fail",
+        health.status === "ok"
+          ? "Local monitoring is available"
+          : "Local monitoring is not ready. Restart the service and retry.",
+      );
       return health.status === "ok";
     } catch (nextError) {
       setAiModel(null);
-      setFaceMonitor((current) => ({ ...current, status: "idle", detail: "Sidecar pending" }));
+      setFaceMonitor((current) => ({
+        ...current,
+        status: "idle",
+        detail: "Sidecar pending",
+      }));
       updateCheck(
         "sidecar",
         "fail",
@@ -649,10 +963,158 @@ function App() {
     }
   }
 
+  async function requestScreenCapture() {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setScreenMonitor({
+        status: "unavailable",
+        detail: "Screen recording is not supported in this browser",
+      });
+      return {
+        passed: false,
+        detail: "Screen recording is not supported in this browser.",
+      };
+    }
+
+    screenCaptureRequestRef.current = true;
+    try {
+      setScreenMonitor({
+        status: "requesting",
+        detail: "Waiting for screen capture permission",
+      });
+      screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+      stopScreenRecorder();
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: "monitor",
+        },
+        audio: false,
+        monitorTypeSurfaces: "include",
+        selfBrowserSurface: "exclude",
+        surfaceSwitching: "exclude",
+      } as DisplayMediaStreamOptions);
+      const track = stream.getVideoTracks()[0];
+      if (!track || track.readyState !== "live" || track.muted) {
+        stream.getTracks().forEach((item) => item.stop());
+        throw new Error("No live screen capture is available.");
+      }
+      const settings = track.getSettings() as MediaTrackSettings & {
+        displaySurface?: string;
+      };
+      if (settings.displaySurface && settings.displaySurface !== "monitor") {
+        stream.getTracks().forEach((item) => item.stop());
+        throw new Error(
+          "Select Entire screen/full display, not a browser tab or window.",
+        );
+      }
+
+      screenStreamRef.current = stream;
+      startScreenRecorder(stream);
+      track.onended = () => {
+        setScreenMonitor({
+          status: "stopped",
+          detail:
+            "Screen recording stopped; browser-activity clips cannot be attached",
+        });
+        updateCheck(
+          "screen",
+          "fail",
+          "Screen recording stopped. Share your screen again before continuing.",
+        );
+        stopScreenRecorder();
+        if (attempt && !isSubmitted) {
+          void sendIntegrityEvent(
+            "SCREEN_RECORDING_STOPPED",
+            {
+              source: "screen_recording_monitor",
+              review_note:
+                "Screen recording was stopped during the active assessment.",
+            },
+            "HIGH",
+            8,
+            true,
+          );
+        }
+      };
+      setScreenMonitor({
+        status: "active",
+        detail: "Screen recording buffer active for browser-activity evidence",
+      });
+      return {
+        passed: true,
+        detail: track.label
+          ? `Full display recording active: ${track.label}`
+          : "Full display recording active",
+      };
+    } catch (nextError) {
+      const detail = errorMessage(
+        nextError,
+        "Screen recording permission was not granted",
+      );
+      setScreenMonitor({ status: "denied", detail });
+      return { passed: false, detail };
+    } finally {
+      screenCaptureRequestRef.current = false;
+    }
+  }
+
+  async function auditConnectedDevices() {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      return {
+        passed: false,
+        detail: "Device enumeration is not supported in this browser.",
+      };
+    }
+
+    await navigator.mediaDevices.enumerateDevices();
+    const screenInfo = window.screen as Screen & { isExtended?: boolean };
+    const getScreenDetails = (
+      window as unknown as {
+        getScreenDetails?: () => Promise<{
+          screens: unknown[];
+          currentScreen?: unknown;
+        }>;
+      }
+    ).getScreenDetails;
+
+    let displayDetail = "Single-display check unavailable in this browser";
+    let extraDisplays = false;
+    if (typeof screenInfo.isExtended === "boolean") {
+      extraDisplays = screenInfo.isExtended;
+      displayDetail = screenInfo.isExtended
+        ? "extended display detected"
+        : "single display";
+    } else if (getScreenDetails) {
+      try {
+        const details = await getScreenDetails();
+        extraDisplays = details.screens.length > 1;
+        displayDetail = `${details.screens.length} display${details.screens.length === 1 ? "" : "s"} detected`;
+      } catch {
+        displayDetail =
+          "display permission not granted for multi-monitor check";
+      }
+    }
+
+    const issues: string[] = [];
+    if (extraDisplays) issues.push("extra monitor/display detected");
+
+    const summary = `${displayDetail}. Built-in cameras, microphones, speakers, and Bluetooth devices are allowed.`;
+    return {
+      passed: issues.length === 0,
+      detail: issues.length
+        ? `${issues.join("; ")}. Disconnect extra displays and check again. ${summary}`
+        : `${summary} No extra display detected.`,
+    };
+  }
+
   function captureFrameDataUrl() {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return null;
+    if (
+      !video ||
+      !canvas ||
+      video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+    )
+      return null;
 
     canvas.width = 224;
     canvas.height = 168;
@@ -662,18 +1124,29 @@ function App() {
     return canvas.toDataURL("image/jpeg", 0.62);
   }
 
-  async function analyzeFaceSample(observedFaceCount?: number, source = "camera_sampler") {
-    if (!attempt || isSubmitted || !sidecarReady) return;
-    const frameDataUrl = observedFaceCount === undefined ? captureFrameDataUrl() : null;
+  async function analyzeFaceSample(
+    observedFaceCount?: number,
+    source = "camera_sampler",
+  ) {
+    if (!attempt || isSubmitted || !sidecarReady || !required.face) return;
+    const frameDataUrl =
+      observedFaceCount === undefined ? captureFrameDataUrl() : null;
     if (observedFaceCount === undefined && frameDataUrl === null) {
-      setFaceMonitor((current) => ({ ...current, status: "waiting", detail: "Waiting for camera frame" }));
+      setFaceMonitor((current) => ({
+        ...current,
+        status: "waiting",
+        detail: "Waiting for camera frame",
+      }));
       return;
     }
 
     try {
       const response = await fetch(`${AI_ENGINE_BASE}/analyze-frame`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...TUNNEL_BYPASS_HEADERS },
+        headers: {
+          "Content-Type": "application/json",
+          ...TUNNEL_BYPASS_HEADERS,
+        },
         body: JSON.stringify({
           session_id: attempt.id,
           frame_data_url: frameDataUrl,
@@ -715,11 +1188,65 @@ function App() {
           frameDataUrl,
         );
       }
+
+      if (
+        analysis.events.length === 0 &&
+        analysis.face_count === 0 &&
+        analysis.state.consecutive_absent_frames >= 2
+      ) {
+        await sendIntegrityEvent(
+          "FACE_ABSENT",
+          {
+            source,
+            detector: "candidate_face_fallback",
+            ai_engine_url: AI_ENGINE_BASE,
+            samples_analyzed: analysis.state.samples_analyzed,
+            face_count: analysis.face_count,
+            consecutive_absent_frames: analysis.state.consecutive_absent_frames,
+            model: analysis.model,
+            review_note:
+              "Candidate-side fallback sent this event because the face count stayed at zero.",
+          },
+          "HIGH",
+          8,
+          true,
+          frameDataUrl,
+        );
+      }
+
+      if (
+        analysis.events.length === 0 &&
+        analysis.face_count > 1 &&
+        analysis.state.consecutive_multiple_frames >= 2
+      ) {
+        await sendIntegrityEvent(
+          "MULTIPLE_PERSONS",
+          {
+            source,
+            detector: "candidate_face_fallback",
+            ai_engine_url: AI_ENGINE_BASE,
+            samples_analyzed: analysis.state.samples_analyzed,
+            face_count: analysis.face_count,
+            consecutive_multiple_frames:
+              analysis.state.consecutive_multiple_frames,
+            model: analysis.model,
+            review_note:
+              "Candidate-side fallback sent this event because multiple faces persisted.",
+          },
+          "HIGH",
+          9,
+          true,
+          frameDataUrl,
+        );
+      }
     } catch (nextError) {
       setFaceMonitor((current) => ({
         ...current,
         status: "error",
-        detail: nextError instanceof Error ? nextError.message : "Face analysis failed",
+        detail:
+          nextError instanceof Error
+            ? nextError.message
+            : "Face analysis failed",
       }));
       void sendIntegrityEvent(
         "AI_ENGINE_INTERRUPTED",
@@ -727,7 +1254,10 @@ function App() {
           source: "ai_sidecar",
           reason: "frame_analysis_failed",
           ai_engine_url: AI_ENGINE_BASE,
-          error: nextError instanceof Error ? nextError.message : "Face analysis failed",
+          error:
+            nextError instanceof Error
+              ? nextError.message
+              : "Face analysis failed",
         },
         "HIGH",
         8,
@@ -745,11 +1275,15 @@ function App() {
   }
 
   async function analyzeObjectSample() {
-    if (!attempt || isSubmitted) return;
+    if (!attempt || isSubmitted || !required.phone) return;
     if (objectSignalRef.current.analyzing) return;
     const frameDataUrl = captureFrameDataUrl();
     if (!frameDataUrl) {
-      setObjectMonitor((current) => ({ ...current, status: "waiting", detail: "Waiting for camera frame" }));
+      setObjectMonitor((current) => ({
+        ...current,
+        status: "waiting",
+        detail: "Waiting for camera frame",
+      }));
       return;
     }
 
@@ -758,7 +1292,10 @@ function App() {
     try {
       const response = await fetch(`${AI_ENGINE_BASE}/detect-objects`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...TUNNEL_BYPASS_HEADERS },
+        headers: {
+          "Content-Type": "application/json",
+          ...TUNNEL_BYPASS_HEADERS,
+        },
         body: JSON.stringify({
           session_id: attempt.id,
           frame_data_url: frameDataUrl,
@@ -771,12 +1308,18 @@ function App() {
       });
       if (!response.ok) throw new Error(await response.text());
 
-      const analysis = await response.json() as YoloObjectResponse;
-      const phone = analysis.phone_like_objects.sort((left, right) => right.confidence - left.confidence)[0];
-      const topDetection = [...analysis.objects].sort((left, right) => right.confidence - left.confidence)[0];
+      const analysis = (await response.json()) as YoloObjectResponse;
+      const phone = analysis.phone_like_objects.sort(
+        (left, right) => right.confidence - left.confidence,
+      )[0];
+      const topDetection = [...analysis.objects].sort(
+        (left, right) => right.confidence - left.confidence,
+      )[0];
       const topLabels = analysis.objects
         .slice(0, 3)
-        .map((item) => `${item.class_name} ${(item.confidence * 100).toFixed(0)}%`)
+        .map(
+          (item) => `${item.class_name} ${(item.confidence * 100).toFixed(0)}%`,
+        )
         .join(", ");
       objectSignalRef.current.consecutivePhoneSamples = phone
         ? objectSignalRef.current.consecutivePhoneSamples + 1
@@ -790,8 +1333,14 @@ function App() {
 
       setObjectMonitor({
         status: phone ? "candidate" : "scanning",
-        label: phone ? `${phone.class_name} candidate` : topDetection ? topDetection.class_name : "No phone",
-        confidence: phone ? phone.confidence : topDetection?.confidence ?? null,
+        label: phone
+          ? `${phone.class_name} candidate`
+          : topDetection
+            ? topDetection.class_name
+            : "No phone",
+        confidence: phone
+          ? phone.confidence
+          : (topDetection?.confidence ?? null),
         detail: phone
           ? `${objectSignalRef.current.consecutivePhoneSamples}/2 phone-like samples`
           : topLabels
@@ -799,9 +1348,12 @@ function App() {
             : `YOLO scanning with ${analysis.model.model_path ?? analysis.model.detector}`,
       });
 
+      const confidentPhoneSample = Boolean(phone && phone.confidence >= 0.25);
+      const persistentPhoneSample =
+        objectSignalRef.current.consecutivePhoneSamples >= 2;
       if (
         phone &&
-        objectSignalRef.current.consecutivePhoneSamples >= 2 &&
+        (confidentPhoneSample || persistentPhoneSample) &&
         !objectSignalRef.current.activePhoneEventId
       ) {
         const event = await sendIntegrityEvent(
@@ -815,13 +1367,18 @@ function App() {
             confidence: Number(phone.confidence.toFixed(4)),
             bbox: phone.bbox,
             min_score: 0.12,
-            consecutive_phone_samples: objectSignalRef.current.consecutivePhoneSamples,
+            consecutive_phone_samples:
+              objectSignalRef.current.consecutivePhoneSamples,
+            trigger_reason: confidentPhoneSample
+              ? "single_high_confidence_sample"
+              : "consecutive_samples",
             detections: analysis.objects.map((item) => ({
               class: item.class_name,
               score: Number(item.confidence.toFixed(4)),
               bbox: item.bbox,
             })),
-            review_note: "YOLO object detector found a phone-like object in consecutive camera frames.",
+            review_note:
+              "YOLO object detector found a phone-like object in consecutive camera frames.",
           },
           "HIGH",
           9,
@@ -829,14 +1386,21 @@ function App() {
           frameDataUrl,
         );
         if (event) objectSignalRef.current.activePhoneEventId = event.id;
-        setObjectMonitor((current) => ({ ...current, status: "event", detail: "Phone event sent to proctor" }));
+        setObjectMonitor((current) => ({
+          ...current,
+          status: "event",
+          detail: "Phone event sent to proctor",
+        }));
       }
     } catch (nextError) {
       setObjectMonitor({
         status: "error",
         label: "Detector error",
         confidence: null,
-        detail: nextError instanceof Error ? nextError.message : "Phone detection failed",
+        detail:
+          nextError instanceof Error
+            ? nextError.message
+            : "Phone detection failed",
       });
       void sendIntegrityEvent(
         "AI_ENGINE_INTERRUPTED",
@@ -844,7 +1408,10 @@ function App() {
           source: "object_detector",
           detector: "ultralytics-yolo",
           reason: "object_detection_failed",
-          error: nextError instanceof Error ? nextError.message : "Phone detection failed",
+          error:
+            nextError instanceof Error
+              ? nextError.message
+              : "Phone detection failed",
         },
         "HIGH",
         8,
@@ -862,7 +1429,8 @@ function App() {
         source: "manual_object_demo",
         detector: "candidate_review_control",
         object_type: "phone",
-        review_note: "Phone/object integrity event captured with the current camera proof frame.",
+        review_note:
+          "Phone/object integrity event captured with the current camera proof frame.",
       },
       "HIGH",
       9,
@@ -877,7 +1445,8 @@ function App() {
         source: "manual_audio_demo",
         detector: "candidate_review_control",
         signal: "background_voice_or_noise",
-        review_note: "Background voice/noise integrity event captured with the current session proof.",
+        review_note:
+          "Background voice/noise integrity event captured with the current session proof.",
       },
       "MEDIUM",
       7,
@@ -893,7 +1462,8 @@ function App() {
         detector: "active_liveness_challenge",
         challenge: "blink_left_right",
         reason: "challenge_not_completed",
-        review_note: "Active liveness challenge failed or could not be completed; review the evidence clip and camera proof.",
+        review_note:
+          "Active liveness challenge failed or could not be completed; review the evidence clip and camera proof.",
       },
       "HIGH",
       9,
@@ -907,7 +1477,10 @@ function App() {
       consent_accepted_at: consentAcceptedAt,
       consent_version: "candidate-preflight-v1",
       checks: Object.fromEntries(
-        readinessChecks.map((check) => [check.key, { status: check.status, detail: check.detail }]),
+        readinessChecks.map((check) => [
+          check.key,
+          { status: check.status, detail: check.detail },
+        ]),
       ),
       fullscreen_active: fullscreenActive,
       document_hidden: document.hidden,
@@ -951,19 +1524,33 @@ function App() {
         isFullscreen ? "Fullscreen active" : "Fullscreen inactive",
       );
       if (monitoringActive && !isFullscreen) {
-        void sendIntegrityEvent("FULLSCREEN_EXIT", { source: "fullscreen_monitor" }, "HIGH", 8, true);
+        void sendIntegrityEvent(
+          "FULLSCREEN_EXIT",
+          { source: "fullscreen_monitor" },
+          "HIGH",
+          8,
+          true,
+        );
       }
     };
 
     document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, [monitoringActive, session?.token, simulateOffline]);
+    return () =>
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, [monitoringActive, session?.token, simulateOffline, selected?.rules]);
 
   useEffect(() => {
-    if (!monitoringActive) return;
+    if (!monitoringActive || !enabled(selected?.rules, "APP_FOCUS_LOST"))
+      return;
 
     const handleFocusLost = () => {
-      void sendIntegrityEvent("APP_FOCUS_LOST", { source: "focus_monitor" }, "MEDIUM", 5, true);
+      void sendIntegrityEvent(
+        "APP_FOCUS_LOST",
+        { source: "focus_monitor" },
+        "MEDIUM",
+        5,
+        true,
+      );
     };
     const handleVisibility = () => {
       if (document.hidden) handleFocusLost();
@@ -980,7 +1567,10 @@ function App() {
   useEffect(() => {
     if (!monitoringActive) return;
     void sendHeartbeat("periodic");
-    const interval = window.setInterval(() => void sendHeartbeat("periodic"), 10000);
+    const interval = window.setInterval(
+      () => void sendHeartbeat("periodic"),
+      10000,
+    );
     return () => window.clearInterval(interval);
   }, [
     monitoringActive,
@@ -993,7 +1583,154 @@ function App() {
   ]);
 
   useEffect(() => {
-    if (!monitoringActive || heartbeatGapNotified) return;
+    if (!monitoringActive) return;
+    const interval = window.setInterval(() => {
+      setRiskTimeline((current) => pruneRiskTimeline(current));
+    }, 2000);
+    return () => window.clearInterval(interval);
+  }, [monitoringActive]);
+
+  useEffect(() => {
+    if (!monitoringActive) return;
+
+    const sendClipboardSignal = (
+      event: ClipboardEvent,
+      action: "copy" | "cut" | "paste",
+    ) => {
+      const eventType =
+        action === "paste"
+          ? "CLIPBOARD_PASTE"
+          : action === "cut"
+            ? "CLIPBOARD_CUT"
+            : "CLIPBOARD_COPY";
+      if (!enabled(selected?.rules, eventType)) return;
+      event.preventDefault();
+      void sendIntegrityEvent(
+        eventType,
+        {
+          source: "clipboard_monitor",
+          action,
+          target: targetSummary(event.target),
+          selected_text_length: window.getSelection()?.toString().length ?? 0,
+          review_note:
+            "Clipboard activity was blocked during the active assessment and sent for proctor review.",
+        },
+        action === "paste" ? "HIGH" : "MEDIUM",
+        action === "paste" ? 7 : 6,
+        true,
+      );
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const shortcut = [
+        event.ctrlKey ? "ctrl" : null,
+        event.metaKey ? "meta" : null,
+        event.altKey ? "alt" : null,
+        event.shiftKey ? "shift" : null,
+        key,
+      ]
+        .filter(Boolean)
+        .join("+");
+
+      if (event.key === "PrintScreen") {
+        void sendIntegrityEvent(
+          "PRINT_SCREEN_ATTEMPT",
+          {
+            source: "keyboard_monitor",
+            shortcut,
+            review_note: "Print screen key was pressed during the assessment.",
+          },
+          "HIGH",
+          7,
+          true,
+        );
+      }
+
+      const devtoolsShortcut =
+        event.key === "F12" ||
+        ((event.ctrlKey || event.metaKey) &&
+          event.shiftKey &&
+          ["i", "j", "c"].includes(key));
+      if (devtoolsShortcut && enabled(selected?.rules, "DEVTOOLS_SHORTCUT")) {
+        event.preventDefault();
+        void sendIntegrityEvent(
+          "DEVTOOLS_SHORTCUT",
+          {
+            source: "keyboard_monitor",
+            shortcut,
+            review_note:
+              "Developer-tools shortcut was blocked during the assessment.",
+          },
+          "MEDIUM",
+          6,
+          true,
+        );
+      }
+    };
+
+    const handleCopy = (event: ClipboardEvent) =>
+      sendClipboardSignal(event, "copy");
+    const handleCut = (event: ClipboardEvent) =>
+      sendClipboardSignal(event, "cut");
+    const handlePaste = (event: ClipboardEvent) =>
+      sendClipboardSignal(event, "paste");
+
+    document.addEventListener("copy", handleCopy);
+    document.addEventListener("cut", handleCut);
+    document.addEventListener("paste", handlePaste);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("copy", handleCopy);
+      document.removeEventListener("cut", handleCut);
+      document.removeEventListener("paste", handlePaste);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [monitoringActive, session?.token, simulateOffline, riskTimeline]);
+
+  useEffect(() => {
+    if (
+      !monitoringActive ||
+      !enabled(selected?.rules, "SCREEN_SHARE_ATTEMPT") ||
+      !navigator.mediaDevices?.getDisplayMedia
+    )
+      return;
+    const mediaDevices = navigator.mediaDevices;
+    const originalGetDisplayMedia =
+      mediaDevices.getDisplayMedia.bind(mediaDevices);
+    mediaDevices.getDisplayMedia = async (
+      constraints?: DisplayMediaStreamOptions,
+    ) => {
+      if (screenCaptureRequestRef.current) {
+        return originalGetDisplayMedia(constraints);
+      }
+      await sendIntegrityEvent(
+        "SCREEN_SHARE_ATTEMPT",
+        {
+          source: "screen_capture_monitor",
+          constraints_requested: Boolean(constraints),
+          review_note:
+            "A screen-capture request was initiated during the active assessment.",
+        },
+        "HIGH",
+        8,
+        true,
+      );
+      return originalGetDisplayMedia(constraints);
+    };
+    return () => {
+      mediaDevices.getDisplayMedia = originalGetDisplayMedia;
+    };
+  }, [monitoringActive, session?.token, simulateOffline, riskTimeline]);
+
+  useEffect(() => {
+    if (
+      !monitoringActive ||
+      !enabled(selected?.rules, "HEARTBEAT_GAP") ||
+      heartbeatGapNotified
+    )
+      return;
     const interval = window.setInterval(() => {
       if (!lastHeartbeatAckAt) return;
       const elapsedMs = Date.now() - new Date(lastHeartbeatAckAt).getTime();
@@ -1009,10 +1746,20 @@ function App() {
       }
     }, 5000);
     return () => window.clearInterval(interval);
-  }, [monitoringActive, heartbeatGapNotified, lastHeartbeatAckAt, session?.token, simulateOffline]);
+  }, [
+    monitoringActive,
+    heartbeatGapNotified,
+    lastHeartbeatAckAt,
+    session?.token,
+    simulateOffline,
+  ]);
 
   useEffect(() => {
-    if (!monitoringActive || !navigator.mediaDevices?.getUserMedia) {
+    if (
+      !monitoringActive ||
+      !required.camera ||
+      !navigator.mediaDevices?.getUserMedia
+    ) {
       return;
     }
 
@@ -1047,11 +1794,17 @@ function App() {
         setFaceMonitor((current) => ({
           ...current,
           status: sidecarReady ? "camera" : "camera-only",
-          detail: sidecarReady ? "Camera sampler active" : "Camera active; face sidecar pending",
+          detail: sidecarReady
+            ? "Camera sampler active"
+            : "Camera active; face sidecar pending",
         }));
       })
       .catch(() => {
-        setFaceMonitor((current) => ({ ...current, status: "warning", detail: "Camera stream unavailable" }));
+        setFaceMonitor((current) => ({
+          ...current,
+          status: "warning",
+          detail: "Camera stream unavailable",
+        }));
         notifyCameraDisabled("camera_stream_unavailable");
       });
 
@@ -1068,14 +1821,22 @@ function App() {
   }, [monitoringActive, session?.token, simulateOffline]);
 
   useEffect(() => {
-    if (!monitoringActive || !navigator.mediaDevices?.getUserMedia) {
+    if (
+      !monitoringActive ||
+      !required.microphone ||
+      !navigator.mediaDevices?.getUserMedia
+    ) {
       return;
     }
 
     let cancelled = false;
     let audioContext: AudioContext | null = null;
     let intervalId = 0;
-    const notifyMicrophoneDisabled = (reason: string, severity = "HIGH", priorityScore = 8) => {
+    const notifyMicrophoneDisabled = (
+      reason: string,
+      severity = "HIGH",
+      priorityScore = 8,
+    ) => {
       void sendIntegrityEvent(
         "MICROPHONE_DISABLED",
         { source: "microphone_monitor", reason },
@@ -1095,8 +1856,10 @@ function App() {
 
         microphoneStreamRef.current = stream;
         stream.getAudioTracks().forEach((track) => {
-          track.onended = () => notifyMicrophoneDisabled("microphone_track_ended");
-          track.onmute = () => notifyMicrophoneDisabled("microphone_track_muted", "MEDIUM", 7);
+          track.onended = () =>
+            notifyMicrophoneDisabled("microphone_track_ended");
+          track.onmute = () =>
+            notifyMicrophoneDisabled("microphone_track_muted", "MEDIUM", 7);
         });
 
         audioContext = new AudioContext();
@@ -1117,7 +1880,9 @@ function App() {
           }
           const rms = Math.sqrt(sumSquares / timeDomainData.length);
           audioSignalRef.current.consecutiveLoudSamples =
-            rms > threshold ? audioSignalRef.current.consecutiveLoudSamples + 1 : 0;
+            rms > threshold
+              ? audioSignalRef.current.consecutiveLoudSamples + 1
+              : 0;
 
           if (
             audioSignalRef.current.consecutiveLoudSamples >= minimumSamples &&
@@ -1132,8 +1897,10 @@ function App() {
                 signal: "sustained_audio_level",
                 rms: Number(rms.toFixed(4)),
                 threshold,
-                samples_above_threshold: audioSignalRef.current.consecutiveLoudSamples,
-                review_note: "Sustained microphone activity detected; review for background voice or noise.",
+                samples_above_threshold:
+                  audioSignalRef.current.consecutiveLoudSamples,
+                review_note:
+                  "Sustained microphone activity detected; review for background voice or noise.",
               },
               "MEDIUM",
               7,
@@ -1162,17 +1929,17 @@ function App() {
   }, [monitoringActive, session?.token, simulateOffline]);
 
   useEffect(() => {
-    if (!monitoringActive || !sidecarReady) return;
+    if (!monitoringActive || !sidecarReady || !required.face) return;
     const interval = window.setInterval(() => void analyzeFaceSample(), 3000);
     return () => window.clearInterval(interval);
-  }, [monitoringActive, sidecarReady, attempt?.id]);
+  }, [monitoringActive, sidecarReady, attempt?.id, required.face]);
 
   useEffect(() => {
-    if (!monitoringActive) return;
+    if (!monitoringActive || !required.phone) return;
     void analyzeObjectSample();
     const interval = window.setInterval(() => void analyzeObjectSample(), 2000);
     return () => window.clearInterval(interval);
-  }, [monitoringActive, attempt?.id]);
+  }, [monitoringActive, attempt?.id, required.phone]);
 
   useEffect(() => {
     if (retryQueue.length > 0 && !simulateOffline) {
@@ -1189,17 +1956,27 @@ function App() {
     updateCheck("sidecar", "pending", "Checking local monitoring...");
 
     try {
-      const health = await api<{ status: string }>("/health", {}, simulateOffline);
+      const health = await api<{ status: string }>(
+        "/health",
+        {},
+        simulateOffline,
+      );
       updateCheck(
         "backend",
         health.status === "ok" ? "pass" : "fail",
-        health.status === "ok" ? "Assessment service is available" : "Assessment service is not ready. Retry in a moment.",
+        health.status === "ok"
+          ? "Assessment service is available"
+          : "Assessment service is not ready. Retry in a moment.",
       );
     } catch {
-      updateCheck("backend", "fail", "Assessment service is unavailable. Check your connection and retry.");
+      updateCheck(
+        "backend",
+        "fail",
+        "Assessment service is unavailable. Check your connection and retry.",
+      );
     }
 
-    await checkSidecarHealth();
+    if (required.sidecar) await checkSidecarHealth();
 
     updateCheck(
       "fullscreen",
@@ -1209,11 +1986,22 @@ function App() {
     setStatus("ready");
   }
 
+  function handleConsent(accepted: boolean) {
+    setConsentAccepted(accepted);
+    setConsentAcceptedAt(accepted ? new Date().toISOString() : null);
+    if (!accepted) {
+      stopScreenCapture();
+    }
+  }
+
   async function verifyLiveness(samples: LivenessSample[]) {
     try {
       const response = await fetch(`${AI_ENGINE_BASE}/verify-liveness`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...TUNNEL_BYPASS_HEADERS },
+        headers: {
+          "Content-Type": "application/json",
+          ...TUNNEL_BYPASS_HEADERS,
+        },
         body: JSON.stringify({
           session_id: selected?.id ?? session?.user.id ?? "preflight",
           samples,
@@ -1228,7 +2016,7 @@ function App() {
         }),
       });
       if (!response.ok) throw new Error(await response.text());
-      const verification = await response.json() as LivenessResponse;
+      const verification = (await response.json()) as LivenessResponse;
       const failed = verification.results.filter((result) => !result.passed);
       return {
         passed: verification.passed,
@@ -1246,25 +2034,66 @@ function App() {
 
   async function startAttempt() {
     if (!selected) return;
-    if (!canStartAttempt || !document.fullscreenElement) {
-      setError("Complete consent and all requirement checks, including fullscreen, before starting.");
+    if (
+      !canStartAttempt ||
+      (required.fullscreen && !document.fullscreenElement)
+    ) {
+      setError(
+        "Complete consent and the enabled requirement checks before starting.",
+      );
       return;
     }
 
     setStatus("saving");
     setError(null);
     try {
-      const health = await api<{ status: string }>("/health", {}, simulateOffline).catch(() => null);
+      const health = await api<{ status: string }>(
+        "/health",
+        {},
+        simulateOffline,
+      ).catch(() => null);
       if (health?.status !== "ok") {
-        updateCheck("backend", "fail", "Assessment service is unavailable. Check your connection and retry.");
-        throw new Error("The assessment connection changed. Repeat the system check before starting.");
+        updateCheck(
+          "backend",
+          "fail",
+          "Assessment service is unavailable. Check your connection and retry.",
+        );
+        throw new Error(
+          "The assessment connection changed. Repeat the system check before starting.",
+        );
       }
-      if (!(await checkSidecarHealth())) {
-        throw new Error("Local monitoring is unavailable. Repeat the system check before starting.");
+      if (required.sidecar && !(await checkSidecarHealth())) {
+        throw new Error(
+          "Local monitoring is unavailable. Repeat the system check before starting.",
+        );
       }
-      if (!document.fullscreenElement) throw new Error("Restore fullscreen before starting the assessment.");
-      if (!readinessRef.current.consentAccepted || readinessRef.current.readinessChecks.some((check) => check.status !== "pass")) {
-        throw new Error("A requirement changed. Complete the remaining checks before starting.");
+      if (
+        required.screen &&
+        (!screenMediaRecorderRef.current ||
+          !screenStreamRef.current
+            ?.getVideoTracks()
+            .some((track) => track.readyState === "live"))
+      ) {
+        updateCheck(
+          "screen",
+          "fail",
+          "Screen recording is not active. Share your screen before starting.",
+        );
+        throw new Error(
+          "Screen recording is required before starting the assessment.",
+        );
+      }
+      if (required.fullscreen && !document.fullscreenElement)
+        throw new Error("Restore fullscreen before starting the assessment.");
+      if (
+        !readinessRef.current.consentAccepted ||
+        readinessRef.current.readinessChecks
+          .filter((check) => requiredCheck(check.key, selected.rules))
+          .some((check) => check.status !== "pass")
+      ) {
+        throw new Error(
+          "A requirement changed. Complete the remaining checks before starting.",
+        );
       }
       const started = await api<{ attempt_id: string; status: string }>(
         "/attempts/start",
@@ -1281,6 +2110,11 @@ function App() {
         simulateOffline,
       );
       setAttempt(detail);
+      setAttemptedAssessmentIds((current) =>
+        current.includes(detail.assessment_id)
+          ? current
+          : [...current, detail.assessment_id],
+      );
       setDraftAnswers(
         Object.fromEntries(
           detail.answers.map((answer) => [
@@ -1290,7 +2124,8 @@ function App() {
         ),
       );
       setStatus("ready");
-      if (detail.status !== "SUBMITTED") void sendHeartbeat("attempt_started", started.attempt_id);
+      if (detail.status !== "SUBMITTED")
+        void sendHeartbeat("attempt_started", started.attempt_id);
     } catch (nextError) {
       setStatus("error");
       setError(errorMessage(nextError, "Attempt start failed."));
@@ -1326,27 +2161,54 @@ function App() {
   }
 
   async function submitAttempt() {
-    if (!attempt) return;
+    if (!attempt || submissionPendingRef.current) return;
     if (retryQueue.length > 0) {
-      setError("Queued answers or monitoring events must sync before submission.");
+      setError(
+        "Queued answers or monitoring events must sync before submission.",
+      );
       return;
     }
 
+    submissionPendingRef.current = true;
+    setSubmitting(true);
     setStatus("saving");
     setError(null);
     try {
-      const result = await api<{ status: string; score: number; answers: Answer[] }>(
+      // Keep the attempt writable until every already-captured clip is persisted.
+      // Event POSTs may add upload tasks while the first batch is draining.
+      while (pendingIntegrityRef.current.size) {
+        await Promise.allSettled([...pendingIntegrityRef.current]);
+      }
+      if (retryQueueRef.current.length)
+        throw new Error(
+          "Queued monitoring events must sync before submission.",
+        );
+      const result = await api<{
+        status: string;
+        score: number;
+        answers: Answer[];
+      }>(
         `/attempts/${attempt.id}/submit`,
         { method: "POST", headers: authHeaders },
         simulateOffline,
       );
       setAttempt((current) =>
-        current ? { ...current, status: result.status, score: result.score, answers: result.answers } : current,
+        current
+          ? {
+              ...current,
+              status: result.status,
+              score: result.score,
+              answers: result.answers,
+            }
+          : current,
       );
       setStatus("ready");
     } catch (nextError) {
       setStatus("error");
       setError(errorMessage(nextError, "Submit failed."));
+    } finally {
+      submissionPendingRef.current = false;
+      setSubmitting(false);
     }
   }
 
@@ -1355,218 +2217,243 @@ function App() {
     try {
       await document.documentElement.requestFullscreen();
     } catch (nextError) {
-      updateCheck("fullscreen", "fail", "Fullscreen could not be enabled. Use a supported desktop browser and retry.");
-      setError(nextError instanceof Error ? nextError.message : "Fullscreen request failed.");
+      updateCheck(
+        "fullscreen",
+        "fail",
+        "Fullscreen could not be enabled. Use a supported desktop browser and retry.",
+      );
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Fullscreen request failed.",
+      );
     }
   }
 
+  function openAssessment(assessmentId: string) {
+    window.location.hash = `/assessments/${assessmentId}/setup`;
+  }
+
+  function returnToAssessments() {
+    setAttempt(null);
+    setConsentAccepted(false);
+    setConsentAcceptedAt(null);
+    setReadinessChecks(initialChecks);
+    setDraftAnswers({});
+    setLastHeartbeatAckAt(null);
+    setRiskTimeline([]);
+    stopScreenCapture();
+    window.location.hash = "/assessments";
+  }
+
+  const busyStatus = ["connecting", "loading", "checking", "saving"].includes(
+    status,
+  );
+  const setupAssessment =
+    !attempt &&
+    selected &&
+    (route.name === "setup" || route.name === "test") &&
+    route.assessmentId === selected.id
+      ? selected
+      : null;
+  const testAssessment =
+    attempt && selected && attempt.assessment_id === selected.id
+      ? selected
+      : null;
+
   return (
-    <div className="candidate-shell">
-      <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById("main-content")?.focus(); }}>Skip to main content</a>
+    <div className={`candidate-shell${attempt ? " exam-shell" : ""}`}>
+      <a
+        className="skip-link"
+        href="#main-content"
+        onClick={(event) => {
+          event.preventDefault();
+          document.getElementById("main-content")?.focus();
+        }}
+      >
+        Skip to main content
+      </a>
       <header className="app-header">
-        <div className="brand">
-          <ShieldCheck size={28} aria-hidden="true" />
-          <span>ProctorAI</span>
-          <span className="portal-label">Candidate portal</span>
-        </div>
-        <div className={`network ${simulateOffline ? "offline" : status}`} aria-live="polite">
-          {simulateOffline ? <WifiOff size={16} aria-hidden="true" /> : <Wifi size={16} aria-hidden="true" />}
-          {simulateOffline ? "offline demo" : status}
+        <a
+          className="brand"
+          href={attempt ? undefined : "#/dashboard"}
+          aria-label="ProctorAI candidate dashboard"
+        >
+          <ShieldCheck size={26} aria-hidden="true" />
+          <span>
+            Proctor<span className="brand-ai">AI</span>
+          </span>
+          <span className="portal-label">Candidate workspace</span>
+        </a>
+        {!attempt ? (
+          <nav className="candidate-nav" aria-label="Candidate navigation">
+            <a
+              href="#/dashboard"
+              className={route.name === "home" ? "active" : ""}
+              aria-current={route.name === "home" ? "page" : undefined}
+            >
+              <LayoutDashboard size={16} />
+              Dashboard
+            </a>
+            <a
+              href="#/assessments"
+              className={
+                ["assessments", "setup"].includes(route.name) ? "active" : ""
+              }
+              aria-current={route.name === "assessments" ? "page" : undefined}
+            >
+              <BookOpen size={16} />
+              My assessments
+            </a>
+            <a
+              href="#/help"
+              className={route.name === "help" ? "active" : ""}
+              aria-current={route.name === "help" ? "page" : undefined}
+            >
+              <CircleHelp size={16} />
+              Help & guidance
+            </a>
+          </nav>
+        ) : (
+          <span className="exam-header-label">
+            <ShieldCheck size={14} />
+            Assessment in progress
+          </span>
+        )}
+        <div className="candidate-header-tools">
+          <div
+            className={`network ${simulateOffline ? "offline" : status}`}
+            aria-live="polite"
+          >
+            {simulateOffline ? (
+              <WifiOff size={16} aria-hidden="true" />
+            ) : (
+              <Wifi size={16} aria-hidden="true" />
+            )}
+            {simulateOffline
+              ? "Offline"
+              : status === "ready"
+                ? "Connected"
+                : status === "saving"
+                  ? "Saving…"
+                  : status === "error"
+                    ? "Connection issue"
+                    : "Connecting…"}
+          </div>
+          <span className="candidate-avatar" title={session?.user.full_name}>
+            {session?.user.full_name
+              .split(" ")
+              .map((part) => part[0])
+              .slice(0, 2)
+              .join("") || "C"}
+          </span>
         </div>
       </header>
 
-      {error ? <div className="error-panel" role="alert">{error}</div> : null}
+      {error ? (
+        <div className="error-panel" role="alert">
+          {error}
+        </div>
+      ) : null}
 
-      {!attempt ? <Preflight
-        assessments={assessments}
-        selected={selected}
-        questionCount={selected?.questions.length ?? 0}
-        checks={readinessChecks}
-        consent={consentAccepted}
-        connected={Boolean(session)}
-        busy={["connecting", "loading", "checking", "saving"].includes(status)}
-        onSelect={loadAssessment}
-        onReconnect={connect}
-        onConsent={(accepted) => { setConsentAccepted(accepted); setConsentAcceptedAt(accepted ? new Date().toISOString() : null); }}
-        onCheck={updateCheck}
-        onSystemCheck={runReadinessChecks}
-        onLivenessVerify={verifyLiveness}
-        onFullscreen={requestFullscreen}
-        onStart={startAttempt}
-      /> : <main id="main-content" tabIndex={-1} className="active-session">
-      <section className="assessment-band">
-        <div>
-          <p className="eyebrow">Candidate Session</p>
-          <h1>{isSubmitted ? "Assessment submitted" : selected?.title}</h1>
-          <span>{selected?.duration_minutes ?? 0} minutes | {selected?.status ?? "PENDING"}</span>
-        </div>
-        <div className="band-actions">
-          {isSubmitted ? <button onClick={() => { setAttempt(null); setConsentAccepted(false); setConsentAcceptedAt(null); setReadinessChecks(initialChecks); setDraftAnswers({}); setLastHeartbeatAckAt(null); window.location.hash = "/assessments"; }}>
-            <ArrowLeft size={18} aria-hidden="true" />Back to assessments
-          </button> : <button onClick={requestFullscreen} disabled={fullscreenActive}>
-            <Expand size={18} aria-hidden="true" />
-            {fullscreenActive ? "Fullscreen active" : "Restore fullscreen"}
-          </button>}
-        </div>
-      </section>
-
-      {!isSubmitted && <section className="status-grid">
-        <div className="status-tile">
-          <Camera size={22} aria-hidden="true" />
-          <span>Camera</span>
-          <strong>{readinessByKey.camera?.status === "pass" ? "Ready" : "Check"}</strong>
-        </div>
-        <div className="status-tile">
-          <MonitorUp size={22} aria-hidden="true" />
-          <span>Monitoring</span>
-          <strong>{monitoringActive ? "Active" : "Pending"}</strong>
-        </div>
-        <div className="status-tile">
-          <CheckCircle2 size={22} aria-hidden="true" />
-          <span>Progress</span>
-          <strong>{answeredCount}/{selected?.questions.length ?? 0}</strong>
-        </div>
-        <div className="status-tile">
-          <Radio size={22} aria-hidden="true" />
-          <span>Heartbeat</span>
-          <strong>{lastHeartbeatAckAt ? "Synced" : "Waiting"}</strong>
-        </div>
-        <div className="status-tile">
-          <ScanFace size={22} aria-hidden="true" />
-          <span>Face AI</span>
-          <strong>{faceMonitor.status}</strong>
-        </div>
-      </section>}
-
-      {!isSubmitted && <section className="sync-strip" aria-label="Network and retry state">
-        <label className="switch-control">
-          <input
-            checked={simulateOffline}
-            onChange={(event) => setSimulateOffline(event.target.checked)}
-            type="checkbox"
-          />
-          <span>Simulate network outage</span>
-        </label>
-        <div>
-          <strong>{retryQueue.length}</strong>
-          <span> queued operation{retryQueue.length === 1 ? "" : "s"}</span>
-        </div>
-        <button onClick={flushQueue} disabled={simulateOffline || retryQueue.length === 0}>
-          <RotateCw size={17} aria-hidden="true" />
-          Retry Sync
-        </button>
-      </section>}
-
-      <section className="exam-surface">
-        <div className="question-block">
-          <div className="runner-header">
-            <div>
-              <span>{isSubmitted ? "Submission receipt" : "Assessment"}</span>
-              <h2>{isSubmitted ? "Your submitted answers" : `${answeredCount} of ${selected?.questions.length ?? 0} answered`}</h2>
-            </div>
-            <button onClick={submitAttempt} disabled={!attempt || isSubmitted || retryQueue.length > 0 || status === "saving"}>
-              <Save size={18} aria-hidden="true" />
-              Submit
-            </button>
-          </div>
-
-          {selected?.questions.length ? (
-            <div className="question-list">
-              {selected.questions.map((question, index) => (
-                <article className="question-card" key={question.id}>
-                  <span>Question {index + 1} | {question.points} points</span>
-                  <h3>{question.prompt}</h3>
-                  {question.question_type === "MCQ" && question.options ? (
-                    <div className="option-grid">
-                      {question.options.map((option) => (
-                        <button
-                          className={draftAnswers[question.id] === option.id ? "selected" : ""}
-                          disabled={!attempt || isSubmitted}
-                          key={option.id}
-                          onClick={() => saveAnswer(question, option.id)}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <textarea
-                      aria-label={`Answer for question ${index + 1}`}
-                      disabled={!attempt || isSubmitted}
-                      value={draftAnswers[question.id] ?? ""}
-                      onChange={(event) =>
-                        setDraftAnswers((current) => ({ ...current, [question.id]: event.target.value }))
-                      }
-                      onBlur={(event) => saveAnswer(question, event.target.value)}
-                    />
-                  )}
-                </article>
-              ))}
-            </div>
-          ) : (
-            <div className="empty-state">No questions are available yet</div>
-          )}
-        </div>
-
-        <aside className="event-card">
-          <span>Submission</span>
-          <strong>{isSubmitted ? `Score ${attempt?.score ?? 0}` : "Not Submitted"}</strong>
-          <small>{isSubmitted ? "Objective questions scored automatically" : "Autosave runs per answer"}</small>
-          {!isSubmitted && <>
-          <span>Face Monitor</span>
-          <strong>
-            {faceMonitor.faceCount === null ? "No Sample" : `${faceMonitor.faceCount} Face${faceMonitor.faceCount === 1 ? "" : "s"}`}
-          </strong>
-          <small>
-            {aiModel ? `${aiModel.name} | ${faceMonitor.samplesAnalyzed} samples` : faceMonitor.detail}
-          </small>
-          <div className="face-actions">
-            <button onClick={() => runFaceDemo(0)} disabled={!monitoringActive || !sidecarReady}>
-              <UserRoundX size={17} aria-hidden="true" />
-              Face Absent
-            </button>
-            <button onClick={() => runFaceDemo(2)} disabled={!monitoringActive || !sidecarReady}>
-              <UsersRound size={17} aria-hidden="true" />
-              Multiple People
-            </button>
-            <button onClick={sendPhoneObjectEvent} disabled={!monitoringActive}>
-              <Smartphone size={17} aria-hidden="true" />
-              Phone/Object
-            </button>
-            <button onClick={sendBackgroundVoiceEvent} disabled={!monitoringActive}>
-              <Volume2 size={17} aria-hidden="true" />
-              Background Voice
-            </button>
-            <button onClick={sendLivenessFailedEvent} disabled={!monitoringActive}>
-              <ScanFace size={17} aria-hidden="true" />
-              Liveness Failed
-            </button>
-          </div>
-          <span>Object Monitor</span>
-          <strong>{objectMonitor.label}</strong>
-          <small>
-            {objectMonitor.confidence === null
-              ? objectMonitor.detail
-              : `${objectMonitor.detail} | ${(objectMonitor.confidence * 100).toFixed(0)}%`}
-          </small>
-          <span>Last Event</span>
-          <strong>{lastEvent ? lastEvent.event_type.replaceAll("_", " ") : "None"}</strong>
-          <small>{lastEvent ? `${lastEvent.status} | Priority ${lastEvent.priority_score} | Evidence ${lastEvent.evidence_status}` : "Ready"}</small>
-          <span>Retry Queue</span>
-          <strong>{retryQueue.length ? `${retryQueue.length} Pending` : "Clear"}</strong>
-          <small>{retryQueue[0] ? `${retryQueue[0].label} | ${retryQueue[0].status}` : "All local operations synced"}</small>
-          <button onClick={() => sendIntegrityEvent()} disabled={!monitoringActive}>
-            <Send size={17} aria-hidden="true" />
-            Send Test Event
-          </button>
-          <video ref={videoRef} aria-label="Local face monitor preview" muted playsInline />
-          <canvas ref={canvasRef} aria-hidden="true" />
-          </>}
-        </aside>
-      </section>
-      </main>}
+      {attempt ? (
+        <TestPage
+          key={attempt.id}
+          assessment={testAssessment}
+          attempt={attempt}
+          draftAnswers={draftAnswers}
+          fullscreenActive={fullscreenActive}
+          saving={submitting || status === "saving"}
+          simulateOffline={simulateOffline}
+          monitoringActive={monitoringActive}
+          sidecarReady={sidecarReady}
+          faceMonitor={faceMonitor}
+          objectMonitor={objectMonitor}
+          screenMonitor={screenMonitor}
+          aiModel={aiModel}
+          liveRiskScore={liveRiskScore}
+          liveRiskLabel={liveRiskLabel}
+          lastHeartbeatAckAt={lastHeartbeatAckAt}
+          retryQueue={retryQueue}
+          lastEvent={lastEvent}
+          videoRef={videoRef}
+          canvasRef={canvasRef}
+          onAnswer={saveAnswer}
+          onDraftChange={(questionId, value) =>
+            setDraftAnswers((current) => ({ ...current, [questionId]: value }))
+          }
+          onSubmit={submitAttempt}
+          onFlushQueue={flushQueue}
+          onSimulateOfflineChange={setSimulateOffline}
+          onRequestFullscreen={requestFullscreen}
+          onExit={returnToAssessments}
+          sendIntegrityEvent={sendIntegrityEvent}
+          onFaceDemo={runFaceDemo}
+          onPhoneDemo={sendPhoneObjectEvent}
+          onVoiceDemo={sendBackgroundVoiceEvent}
+          onLivenessFailedDemo={sendLivenessFailedEvent}
+        />
+      ) : route.name === "home" ? (
+        <CandidateHome
+          assessments={assessments}
+          name={session?.user.full_name ?? ""}
+          connected={Boolean(session)}
+          onOpen={openAssessment}
+        />
+      ) : route.name === "help" ? (
+        <CandidateHelp />
+      ) : route.name === "assessments" ? (
+        <AssessmentsPage
+          assessments={assessments}
+          connected={Boolean(session)}
+          busy={busyStatus}
+          attemptedAssessmentIds={attemptedAssessmentIds}
+          onRefresh={connect}
+          onOpen={openAssessment}
+        />
+      ) : (
+        <SetupPage
+          key={route.assessmentId}
+          step={route.name === "setup" ? (route.step ?? "consent") : "consent"}
+          assessment={setupAssessment}
+          checks={readinessChecks}
+          consent={consentAccepted}
+          busy={busyStatus}
+          error={error}
+          canStart={canStartAttempt}
+          starting={status === "saving"}
+          onBack={() => {
+            window.location.hash = "/assessments";
+          }}
+          onReload={() => {
+            void loadAssessment(route.assessmentId);
+          }}
+          onConsent={handleConsent}
+          onCheck={updateCheck}
+          onSystemCheck={runReadinessChecks}
+          onScreenCapture={requestScreenCapture}
+          onDeviceAudit={auditConnectedDevices}
+          onLivenessVerify={verifyLiveness}
+          onFullscreen={requestFullscreen}
+          onStart={startAttempt}
+        />
+      )}
+      {!attempt ? (
+        <footer className="candidate-footer">
+          <span>
+            <ShieldCheck size={14} />
+            ProctorAI · A focused assessment experience
+          </span>
+          <a href="#/help">
+            Help & guidance <CircleHelp size={13} />
+          </a>
+        </footer>
+      ) : null}
     </div>
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+const root =
+  import.meta.hot?.data.root ?? createRoot(document.getElementById("root")!);
+root.render(<App />);
+if (import.meta.hot) import.meta.hot.data.root = root;

@@ -1,0 +1,257 @@
+:root {
+  --muted: #596c86;
+}
+.consent-control {
+  color: #526985;
+}
+.exam-bar-title h1 {
+  font-size: 18px;
+  line-height: 1.45;
+  letter-spacing: -0.4px;
+  font-weight: 600;
+}
+.exam-header-label {
+  color: #596c86;
+}
+.network.ready,
+.network.syncing,
+.exam-shell .app-header .network {
+  color: #297153;
+}
+.candidate-avatar {
+  color: #3b5c88;
+}
+.candidate-page-heading .eyebrow,
+.candidate-welcome > .eyebrow,
+.next-card-heading > .eyebrow,
+.eyebrow,
+.candidate-page-heading p:not(.eyebrow),
+.date-label,
+.next-assessment > p,
+.next-meta,
+.next-meta > span,
+.prep-number,
+.candidate-footer,
+.candidate-footer > a,
+.preparation-heading p,
+.preparation-cards p,
+.candidate-summary-strip div > div > span,
+.assessment-card-footer > span,
+.assessment-card-grid .assessment-description,
+.assessment-type,
+.assessment-card-grid .assessment-meta,
+.assessment-guidance strong,
+.assessment-guidance p,
+.assessment-guidance > a,
+.candidate-search,
+.assessment-tabs button,
+.help-intro p,
+.help-faq details > p,
+.candidate-help-aside ul,
+.help-contact p,
+.setup-assessment-name,
+.setup-summary-meta,
+.rail-title,
+.rail-progress,
+.privacy-note p,
+.section-title p,
+.policy-row p,
+.check-text p,
+.feature-note span,
+.actionbar-progress > span,
+.rail-label,
+.section-state.pending,
+.feature-note strong,
+.preview-placeholder,
+.section-num,
+.check-text strong,
+.rail-card-head > span,
+.exam-bar-title > span,
+.question-card .eyebrow,
+.question-pager > span,
+.proctor-list > li,
+.proctor-list strong,
+.diag-panel > summary,
+.receipt-banner p,
+.receipt-answer,
+.guide-mark {
+  color: #536983;
+}
+.candidate-welcome > .eyebrow {
+  color: #506e99;
+}
+.badge.tone-success {
+  color: #1e7152;
+}
+.badge.tone-neutral {
+  color: #596b83;
+}
+.badge.tone-info {
+  color: #2c5b9d;
+}
+.badge.tone-warning {
+  color: #825c19;
+}
+.candidate-search input::placeholder,
+input::placeholder,
+textarea::placeholder {
+  color: #64748b;
+  opacity: 1;
+}
+.assessment-tabs button.active {
+  color: #2c5fae;
+}
+.assessment-tabs button > span {
+  color: #50698d;
+}
+.rail-link.current .rail-label {
+  color: #2e5db0;
+}
+.rail-link.state-pass .rail-dot {
+  color: #237153;
+}
+.rail-dot {
+  color: #5a7294;
+}
+.actionbar-progress strong {
+  color: #465f83;
+}
+.check-badge.pass,
+.section-state.pass {
+  color: #237153;
+}
+.check-badge.warning,
+.section-state.warning {
+  color: #815d1d;
+}
+.check-badge.pending {
+  color: #586c87;
+}
+.proctor-live {
+  color: #297153;
+}
+.timer-chip {
+  color: #49688f;
+}
+.exam-recording-status {
+  color: #277154;
+}
+.question-options > span.correct {
+  color: #237153;
+}
+.receipt-banner h1 {
+  color: #287257;
+}
+.preparation-heading > a,
+.assessment-guidance > a {
+  color: #2c5eb0;
+}
+.option {
+  color: #506784;
+}
+.option-marker {
+  color: #536c91;
+}
+.option.selected {
+  color: #2d5d9f;
+}
+.nav-dot {
+  color: #4e688d;
+}
+.nav-dot.current {
+  color: #2c5b9b;
+}
+.nav-dot.answered {
+  color: #2e7053;
+}
+.score-chip {
+  color: #237153;
+}
+.candidate-page-heading p:not(.eyebrow),
+.next-assessment > p {
+  font-size: 13px;
+}
+.next-meta {
+  font-size: 11px;
+}
+.preparation-heading p {
+  font-size: 12px;
+}
+.candidate-summary-strip div > div > span {
+  font-size: 12px;
+}
+.next-card-heading > .eyebrow,
+.candidate-welcome > .eyebrow {
+  font-size: 10px;
+}
+.candidate-footer {
+  font-size: 11px;
+}
+.policy-row p,
+.section-title p {
+  font-size: 13px;
+}
+.rail-link {
+  font-size: 12px;
+}
+.rail-label {
+  font-size: 12px;
+}
+.rail-progress {
+  font-size: 11px;
+}
+.privacy-note p {
+  font-size: 11px;
+}
+.actionbar-progress > span {
+  font-size: 11px;
+}
+.check-text p {
+  font-size: 12px;
+}
+.section-state {
+  font-size: 10px;
+}
+.check-badge {
+  font-size: 10px;
+}
+.check-row {
+  min-height: 70px;
+}
+.nav-dot {
+  min-height: 44px;
+  height: 44px;
+}
+.question-card .option {
+  min-height: 58px;
+}
+@media (max-width: 700px) {
+  .candidate-footer {
+    font-size: 9px;
+  }
+  .candidate-summary-strip div > div > span {
+    font-size: 11px;
+  }
+  .rail-label {
+    font-size: 11px;
+  }
+  .section-state {
+    font-size: 9px;
+  }
+  .check-badge {
+    font-size: 9px;
+  }
+  .section-title p,
+  .policy-row p {
+    font-size: 12px;
+  }
+  .actionbar-progress > span {
+    font-size: 10px;
+  }
+  .candidate-search input {
+    font-size: 16px;
+  }
+  .help-faq summary {
+    min-height: 44px;
+  }
+}

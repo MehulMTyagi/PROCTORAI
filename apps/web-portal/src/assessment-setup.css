@@ -1,0 +1,111 @@
+.assignment-choice {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 0;
+}
+.assignment-choice legend {
+  padding: 0 6px;
+  font-size: 14px;
+}
+.assignment-select-all {
+  display: flex;
+  gap: 16px;
+  padding: 12px 0;
+}
+.assignment-options {
+  max-height: 300px;
+  overflow: auto;
+}
+.assignment-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  min-height: 66px;
+  padding: 10px 2px;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+.assignment-option input {
+  width: 18px;
+  min-height: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  accent-color: #2563eb;
+}
+.assignment-option span {
+  min-width: 0;
+}
+.assignment-option strong,
+.assignment-option small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.assignment-option small {
+  color: #586b85;
+  font-weight: 400;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.assignment-empty {
+  padding: 18px 0;
+  color: #586b85;
+  font-size: 13px;
+}
+.creation-section {
+  padding: 24px 0 0;
+  border-top: 1px solid var(--border);
+}
+.creation-section h3 {
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+.creation-section > p {
+  color: #586b85;
+  font-size: 13px;
+  margin-bottom: 18px;
+}
+.creation-people {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.feature-choices .policy-grid {
+  padding: 0;
+}
+.feature-choices .policy-row {
+  min-width: 0;
+}
+.feature-choices .policy-row > span {
+  min-width: 0;
+}
+.feature-choices .policy-row small {
+  font-size: 12px;
+  line-height: 1.6;
+  text-transform: none;
+}
+.assignment-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 1050px) {
+  .creation-people {
+    grid-template-columns: 1fr;
+  }
+  .feature-choices .policy-grid {
+    grid-template-columns: 1fr;
+  }
+}

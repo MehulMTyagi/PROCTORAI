@@ -6,8 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.base_class import utc_now
 from app.models.evidence import EvidenceFile
-from app.models.enums import EvidenceStatus, Severity
+from app.models.enums import EvidenceStatus, ReviewDecision, Severity
 from app.models.integrity_event import IntegrityEvent
+from app.models.review import EventReview
 
 
 class EvidenceFileResponse(BaseModel):
@@ -61,6 +62,33 @@ class EvidenceFailureCreate(BaseModel):
     detail: str | None = Field(default=None, max_length=1000)
 
 
+class EventReviewCreate(BaseModel):
+    decision: str = Field(default=ReviewDecision.INCONCLUSIVE.value, max_length=32)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class EventReviewResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    event_id: UUID
+    reviewer_id: UUID
+    decision: str
+    note: str | None
+    reviewed_at: datetime
+
+    @classmethod
+    def from_review(cls, review: EventReview) -> "EventReviewResponse":
+        return cls(
+            id=review.id,
+            event_id=review.event_id,
+            reviewer_id=review.reviewer_id,
+            decision=review.decision,
+            note=review.note,
+            reviewed_at=review.reviewed_at,
+        )
+
+
 class IntegrityEventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -77,6 +105,7 @@ class IntegrityEventResponse(BaseModel):
     evidence_status: str
     metadata: dict[str, Any]
     evidence_files: list[EvidenceFileResponse] = Field(default_factory=list)
+    reviews: list[EventReviewResponse] = Field(default_factory=list)
 
     @classmethod
     def from_event(cls, event: IntegrityEvent, assessment_id: UUID) -> "IntegrityEventResponse":
@@ -94,4 +123,5 @@ class IntegrityEventResponse(BaseModel):
             evidence_status=event.evidence_status,
             metadata=event.payload,
             evidence_files=[EvidenceFileResponse.from_file(item) for item in event.evidence_files],
+            reviews=[EventReviewResponse.from_review(item) for item in event.reviews],
         )

@@ -12,6 +12,7 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@fix-webm-duration/fix": "^1.0.1",
     "@tauri-apps/api": "^2.11.1",
     "@vitejs/plugin-react": "^5.0.0",
     "lucide-react": "^0.468.0",

@@ -13,13 +13,15 @@ from app.api.deps import get_current_user
 from app.api.websocket_manager import websocket_manager
 from app.core.config import settings
 from app.db.session import get_db
-from app.models.assessment import Assessment, AssessmentProctor
+from app.models.assessment import Assessment, AssessmentProctor, ProctoringRule
 from app.models.attempt import Attempt
+from app.models.enums import AttemptStatus, EventStatus, EvidenceStatus, ReviewDecision, UserRole
 from app.models.evidence import EvidenceFile
-from app.models.enums import AttemptStatus, EventStatus, EvidenceStatus, UserRole
 from app.models.integrity_event import IntegrityEvent
+from app.models.review import EventReview
 from app.models.user import User
 from app.schemas.events import (
+    EventReviewCreate,
     EvidenceFailureCreate,
     EvidenceFileResponse,
     IntegrityEventCreate,
@@ -39,20 +41,28 @@ def _get_authorized_candidate_attempt(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attempt not found")
 
     if current_user.role != UserRole.CANDIDATE.value or attempt.candidate_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+        )
     if attempt.status == AttemptStatus.SUBMITTED.value:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Attempt is already submitted")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Attempt is already submitted"
+        )
 
     return attempt
 
 
-def _ensure_event_belongs_to_attempt(event: IntegrityEvent | None, attempt: Attempt) -> IntegrityEvent:
+def _ensure_event_belongs_to_attempt(
+    event: IntegrityEvent | None, attempt: Attempt
+) -> IntegrityEvent:
     if event is None or event.attempt_id != attempt.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     return event
 
 
-def _ensure_can_view_assessment_events(assessment: Assessment | None, current_user: User, db: Session) -> None:
+def _ensure_can_view_assessment_events(
+    assessment: Assessment | None, current_user: User, db: Session
+) -> None:
     if assessment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found")
 
@@ -64,12 +74,18 @@ def _ensure_can_view_assessment_events(assessment: Assessment | None, current_us
             )
         )
         if is_assigned is None:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+            )
     elif current_user.role == UserRole.EXAMINER.value:
         if assessment.created_by_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+            )
     elif current_user.role != UserRole.ADMIN.value:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+        )
 
 
 def _get_viewable_event(event_id: UUID, current_user: User, db: Session) -> IntegrityEvent:
@@ -83,12 +99,21 @@ def _get_viewable_event(event_id: UUID, current_user: User, db: Session) -> Inte
 
     if current_user.role == UserRole.CANDIDATE.value:
         if attempt.candidate_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+            )
         return event
 
     assessment = db.get(Assessment, attempt.assessment_id)
     _ensure_can_view_assessment_events(assessment, current_user, db)
     return event
+
+
+def _event_assessment_id(event: IntegrityEvent, db: Session) -> UUID:
+    attempt = db.get(Attempt, event.attempt_id)
+    if attempt is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attempt not found")
+    return attempt.assessment_id
 
 
 @router.post(
@@ -103,6 +128,14 @@ async def create_integrity_event(
     db: Session = Depends(get_db),
 ) -> IntegrityEventResponse:
     attempt = _get_authorized_candidate_attempt(attempt_id, current_user, db)
+    policy = db.scalar(
+        select(ProctoringRule).where(ProctoringRule.assessment_id == attempt.assessment_id)
+    )
+    rule = policy.rules.get(payload.event_type, {}) if policy else {}
+    if isinstance(rule, dict) and rule.get("enabled") is False:
+        raise HTTPException(
+            status_code=409, detail="This monitoring feature is disabled for the assessment"
+        )
 
     event = IntegrityEvent(
         attempt_id=attempt.id,
@@ -143,9 +176,23 @@ async def upload_event_evidence(
 ) -> EvidenceFileResponse:
     attempt = _get_authorized_candidate_attempt(attempt_id, current_user, db)
     event = _ensure_event_belongs_to_attempt(db.get(IntegrityEvent, event_id), attempt)
+    policy = db.scalar(
+        select(ProctoringRule).where(ProctoringRule.assessment_id == attempt.assessment_id)
+    )
+    screen_rule = policy.rules.get("SCREEN_RECORDING", {}) if policy else {}
+    if (
+        kind == "SCREEN_RECORDING"
+        and isinstance(screen_rule, dict)
+        and screen_rule.get("enabled") is False
+    ):
+        raise HTTPException(
+            status_code=409, detail="Screen recording is disabled for the assessment"
+        )
 
     if not file.filename:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Evidence file is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Evidence file is required"
+        )
 
     max_bytes = settings.max_evidence_mb * 1024 * 1024
     evidence_root = Path(settings.evidence_dir)
@@ -176,7 +223,9 @@ async def upload_event_evidence(
     computed_hash = digest.hexdigest()
     if sha256_hash and sha256_hash.lower() != computed_hash:
         storage_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Evidence hash mismatch")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Evidence hash mismatch"
+        )
 
     evidence_file = EvidenceFile(
         event_id=event.id,
@@ -252,7 +301,9 @@ def list_assessment_events(
         .order_by(IntegrityEvent.occurred_at.desc())
     ).all()
 
-    return [IntegrityEventResponse.from_event(event, assessment_id=assessment_id) for event in events]
+    return [
+        IntegrityEventResponse.from_event(event, assessment_id=assessment_id) for event in events
+    ]
 
 
 @router.get("/proctor/events/{event_id}/evidence/{evidence_id}")
@@ -276,3 +327,53 @@ def download_event_evidence(
         media_type=evidence_file.mime_type,
         filename=evidence_file.original_filename or storage_path.name,
     )
+
+
+@router.post(
+    "/proctor/events/{event_id}/reviews",
+    response_model=IntegrityEventResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def review_event(
+    event_id: UUID,
+    payload: EventReviewCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> IntegrityEventResponse:
+    if current_user.role not in {
+        UserRole.PROCTOR.value,
+        UserRole.EXAMINER.value,
+        UserRole.ADMIN.value,
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+        )
+
+    event = _get_viewable_event(event_id, current_user, db)
+    decision = payload.decision
+    if decision not in {item.value for item in ReviewDecision}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported review decision"
+        )
+
+    review = EventReview(
+        event_id=event.id,
+        reviewer_id=current_user.id,
+        decision=decision,
+        note=payload.note,
+    )
+    if decision == ReviewDecision.CONFIRMED_SUSPICIOUS.value:
+        event.status = EventStatus.CONFIRMED.value
+    elif decision == ReviewDecision.FALSE_POSITIVE.value:
+        event.status = EventStatus.FALSE_POSITIVE.value
+    else:
+        event.status = EventStatus.INCONCLUSIVE.value
+
+    db.add(review)
+    db.commit()
+    db.refresh(event)
+
+    assessment_id = _event_assessment_id(event, db)
+    response = IntegrityEventResponse.from_event(event, assessment_id=assessment_id)
+    await websocket_manager.broadcast(str(assessment_id), response.model_dump(mode="json"))
+    return response

@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, require_roles
@@ -11,6 +11,7 @@ from app.models.enums import UserRole
 from app.models.question import Question
 from app.models.user import User
 from app.schemas.assessments import (
+    AssessmentAssignments,
     AssessmentCreate,
     AssessmentDetailResponse,
     AssessmentResponse,
@@ -22,6 +23,41 @@ from app.schemas.assessments import (
 )
 
 router = APIRouter(prefix="/assessments")
+
+
+def _validate_assignees(db: Session, candidate_ids: list[UUID], proctor_ids: list[UUID]) -> None:
+    for ids, role in ((candidate_ids, UserRole.CANDIDATE), (proctor_ids, UserRole.PROCTOR)):
+        if not ids:
+            continue
+        found = set(db.scalars(select(User.id).where(User.id.in_(ids), User.role == role.value)))
+        if found != set(ids):
+            raise HTTPException(
+                status_code=400, detail=f"Select valid {role.value.lower()} accounts"
+            )
+
+
+def _detail(
+    db: Session, assessment: Assessment, include_assignees: bool = False
+) -> AssessmentDetailResponse:
+    response = AssessmentDetailResponse.from_assessment(assessment)
+    policy = db.scalar(select(ProctoringRule).where(ProctoringRule.assessment_id == assessment.id))
+    response.rules = policy.rules if policy else {}
+    if include_assignees:
+        response.candidate_ids = list(
+            db.scalars(
+                select(AssessmentCandidate.candidate_id).where(
+                    AssessmentCandidate.assessment_id == assessment.id
+                )
+            )
+        )
+        response.proctor_ids = list(
+            db.scalars(
+                select(AssessmentProctor.proctor_id).where(
+                    AssessmentProctor.assessment_id == assessment.id
+                )
+            )
+        )
+    return response
 
 
 def _get_assessment(db: Session, assessment_id: UUID) -> Assessment:
@@ -49,6 +85,7 @@ def create_assessment(
     current_user: User = Depends(require_roles(UserRole.EXAMINER, UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ) -> Assessment:
+    _validate_assignees(db, payload.candidate_ids, payload.proctor_ids)
     assessment = Assessment(
         title=payload.title,
         description=payload.description,
@@ -59,6 +96,24 @@ def create_assessment(
         created_by_id=current_user.id,
     )
     db.add(assessment)
+    db.flush()
+    db.add_all(
+        [
+            AssessmentCandidate(assessment_id=assessment.id, candidate_id=user_id)
+            for user_id in set(payload.candidate_ids)
+        ]
+    )
+    db.add_all(
+        [
+            AssessmentProctor(assessment_id=assessment.id, proctor_id=user_id)
+            for user_id in set(payload.proctor_ids)
+        ]
+    )
+    db.add(
+        ProctoringRule(
+            assessment_id=assessment.id, rules=payload.rules, config_version="assessment-v1"
+        )
+    )
     db.commit()
     db.refresh(assessment)
     return assessment
@@ -106,21 +161,67 @@ def get_assessment(
     if current_user.role == UserRole.CANDIDATE.value:
         assigned = db.get(AssessmentCandidate, (assessment.id, current_user.id))
         if assigned is None:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
-        response = AssessmentDetailResponse.from_assessment(assessment)
-        response.questions = [QuestionResponse.candidate_view(question) for question in assessment.questions]
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+            )
+        response = _detail(db, assessment)
+        response.questions = [
+            QuestionResponse.candidate_view(question) for question in assessment.questions
+        ]
         return response
 
     if current_user.role == UserRole.PROCTOR.value:
         assigned = db.get(AssessmentProctor, (assessment.id, current_user.id))
         if assigned is None:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+            )
     elif current_user.role in {UserRole.EXAMINER.value, UserRole.ADMIN.value}:
         _ensure_examiner_owns_assessment(assessment, current_user)
     else:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+        )
 
-    return AssessmentDetailResponse.from_assessment(assessment)
+    return _detail(
+        db,
+        assessment,
+        include_assignees=current_user.role
+        in {
+            UserRole.EXAMINER.value,
+            UserRole.ADMIN.value,
+        },
+    )
+
+
+@router.put("/{assessment_id}/assignments", response_model=AssessmentDetailResponse)
+def replace_assignments(
+    assessment_id: UUID,
+    payload: AssessmentAssignments,
+    current_user: User = Depends(require_roles(UserRole.EXAMINER, UserRole.ADMIN)),
+    db: Session = Depends(get_db),
+) -> AssessmentDetailResponse:
+    assessment = _get_assessment(db, assessment_id)
+    _ensure_examiner_owns_assessment(assessment, current_user)
+    _validate_assignees(db, payload.candidate_ids, payload.proctor_ids)
+    db.execute(
+        delete(AssessmentCandidate).where(AssessmentCandidate.assessment_id == assessment_id)
+    )
+    db.execute(delete(AssessmentProctor).where(AssessmentProctor.assessment_id == assessment_id))
+    db.add_all(
+        [
+            AssessmentCandidate(assessment_id=assessment_id, candidate_id=user_id)
+            for user_id in set(payload.candidate_ids)
+        ]
+    )
+    db.add_all(
+        [
+            AssessmentProctor(assessment_id=assessment_id, proctor_id=user_id)
+            for user_id in set(payload.proctor_ids)
+        ]
+    )
+    db.commit()
+    return _detail(db, assessment, include_assignees=True)
 
 
 @router.put("/{assessment_id}", response_model=AssessmentResponse)
@@ -170,7 +271,9 @@ def assign_candidate(
     _ensure_examiner_owns_assessment(assessment, current_user)
     user = db.get(User, payload.user_id)
     if user is None or user.role != UserRole.CANDIDATE.value:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User is not a candidate")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="User is not a candidate"
+        )
     if db.get(AssessmentCandidate, (assessment_id, payload.user_id)) is None:
         db.add(AssessmentCandidate(assessment_id=assessment_id, candidate_id=payload.user_id))
         db.commit()
@@ -210,4 +313,8 @@ def update_rules(
     rules.rules = payload.rules
     rules.config_version = payload.config_version
     db.commit()
-    return {"assessment_id": str(assessment_id), "config_version": rules.config_version, "rules": rules.rules}
+    return {
+        "assessment_id": str(assessment_id),
+        "config_version": rules.config_version,
+        "rules": rules.rules,
+    }

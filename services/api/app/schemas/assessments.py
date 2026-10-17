@@ -24,6 +24,9 @@ class AssessmentCreate(BaseModel):
     status: str = "DRAFT"
     start_at: datetime | None = None
     end_at: datetime | None = None
+    candidate_ids: list[UUID] = Field(default_factory=list)
+    proctor_ids: list[UUID] = Field(default_factory=list)
+    rules: dict[str, Any] = Field(default_factory=dict)
 
 
 class AssessmentUpdate(BaseModel):
@@ -85,6 +88,9 @@ class QuestionResponse(BaseModel):
 
 class AssessmentDetailResponse(AssessmentResponse):
     questions: list[QuestionResponse] = Field(default_factory=list)
+    rules: dict[str, Any] = Field(default_factory=dict)
+    candidate_ids: list[UUID] = Field(default_factory=list)
+    proctor_ids: list[UUID] = Field(default_factory=list)
 
     @classmethod
     def from_assessment(cls, assessment: Assessment) -> "AssessmentDetailResponse":
@@ -106,6 +112,11 @@ class AssessmentDetailResponse(AssessmentResponse):
 
 class AssignmentRequest(BaseModel):
     user_id: UUID
+
+
+class AssessmentAssignments(BaseModel):
+    candidate_ids: list[UUID] = Field(default_factory=list)
+    proctor_ids: list[UUID] = Field(default_factory=list)
 
 
 class RuleUpdate(BaseModel):

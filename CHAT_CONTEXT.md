@@ -1,6 +1,53 @@
 # ProctorAI Chat Context
 
-Last updated: 2026-10-01
+Last updated: 2026-10-17
+
+## Chat Recovery — 2026-10-17
+
+- Read the available history of all 78 turns in the project chat `Plan project from markdown files` (thread `01a07c5c-240e-7b83-8ea5-63f8604938a6`) to continue in a new chat after repeated response failures.
+- The most recent unanswered project question was: "are we using any dataset?" Answer should distinguish pretrained model training data, any locally collected validation data, and actual custom training; verify the implementation before claiming a dataset was downloaded or used for training.
+- Identity verification was discussed as a future addition: registered selfie/live selfie comparison, optional ID review, and identity continuity. The discussion alone does not establish implementation.
+- Latest report review concerned the user's manually edited Desktop files `C:\Users\Mehul\OneDrive\Desktop\phase1 report.docx` and `C:\Users\Mehul\OneDrive\Desktop\phase2 report.docx`. Phase 1 needed grammar cleanup, including a sentence that incorrectly said human evidence review should never be necessary. Phase 2 still had a TeamID placeholder and rendered to 14 pages with near-empty pages, exceeding its 6–7 page requirement. These review findings were reported; repairs to those Desktop files were not completed in that turn.
+- Preserve the user's single-column report preference. The repository Phase 2 report had previously been adjusted to 7 pages; it is a different file from the manually edited Desktop copy.
+- Team details visible in the edited report: Mehul Mohan Tyagi (S24BCAU0044), Yash Kumar (S24BCAU0072), Bennett University. Team ID remains unspecified in the recovered report review.
+- Candidate UI discussion ended with a request for a UI-only prompt covering separate assessment selection, setup, and test pages. Do not treat that prompt as proof a further redesign was implemented.
+- Prior test counts, running-service claims, deployment URLs, and licensing observations below are historical records; check current state when resuming implementation or troubleshooting.
+
+## ML Dataset Status — verified 2026-10-17
+
+- The AI code defaults to Ultralytics `yolov8n.pt` and calls `model.predict()` for object/phone detection. A weights file exists at `services/ai-engine/yolov8n.pt`; `YOLO_MODEL_PATH` can override the default.
+- Standard YOLOv8 detection weights are pretrained on COCO (Ultralytics documentation: https://docs.ultralytics.com/models/yolov8/). ProctorAI therefore uses COCO indirectly through pretrained weights, rather than training on downloaded COCO images.
+- Face counting uses OpenCV's pretrained Haar cascade. Liveness uses face/eye/profile cascades and motion rules; microphone noise detection uses an audio-level heuristic.
+- Before this chat's training work, repository search found no custom training pipeline or completed labeled validation dataset. Earlier report mentions of custom validation data and WIDER FACE were plans/references. YOLO is a model, not a dataset.
+
+## Model Training Requirement — 2026-10-17
+
+- User clarified that the college requires at least one model **trained from scratch**; fine-tuning is insufficient.
+- Added a custom `PhoneCropCNN` (randomly initialized convolutional/classification layers), COCO phone/other-object crop preparation, independent train/validation/test splits, training/evaluation CLI, leakage checks, and methodology in `docs/ml-training.md`.
+- This is an object-crop classifier, not a replacement full-frame detector. Existing live YOLO behavior is unchanged. Do not report classifier test accuracy as live proctoring accuracy.
+- Actual training completed: 1,200 labeled COCO train2017 crops from distinct source images, balanced 840/180/180 training/validation/test split, 30 epochs, seed 42, CPU, 89,249 learned parameters, no pretrained initialization. Best epoch 25 and threshold 0.41 were selected using validation only.
+- Held-out test: accuracy 67.78%, phone precision 63.11%, recall 85.56%, F1 72.64%, ROC AUC 0.7632. Confusion matrix (other/phone): [[45,45],[13,77]]. The false-positive rate on negative test crops is 50%; this remains an experimental baseline, not a live-detector upgrade.
+- Saved artifacts: `models/phone-classifier/` contains `best.pt`, dataset/source provenance, hashes, epoch history, held-out predictions, metrics and chart. `docs/phone-classifier-results.md` records actual measured results. Reproduction/prediction commands are in `docs/ml-training.md`; dataset preparation and model binaries remain local/ignored by Git.
+- Verified trained parameters changed, checkpoint and source hashes match, and reloaded single-crop inference matches saved test predictions. Do not tune against the already evaluated test set.
+- AI-engine suite passed with 15 tests, including five new checks for split leakage and saved prediction thresholds. Scoped Python lint passed.
+
+## Multipage UI Redesign — 2026-10-17
+
+- Implemented the user's request to remodel the operational website UI across both React clients. Examiner/proctor now have separate overview, assessment/builder, people/policy, monitoring, evidence-review, reports and help routes. Candidate has dashboard, assessments, help, eight separately routed setup steps, test and receipt screens. Entry URLs: web `http://127.0.0.1:5173/#/examiner/overview`, candidate `http://127.0.0.1:5174/#/dashboard`.
+- Added reusable web `Workspace.tsx`, candidate `PortalPages.tsx`, responsive design styles and accessible mobile navigation. Uses existing real APIs; no invented webcam feeds/attendance metrics. Seed-account development auth/role switching remains unchanged. Saved policy/assignment support was added in the follow-up below.
+- Browser testing found and fixed naive UTC timestamp parsing (both clients' `time.ts`) and invalid rolling WebM assembly (`evidenceRecorder.ts`, complete staggered segments plus `@fix-webm-duration/fix`). Submission now drains pending event/evidence tasks before the attempt closes. New review events do not change the currently selected evidence.
+- Both frontend builds and strict unused-symbol TypeScript checks pass. Responsive tests at 390/768/1440 covered 33 route/viewport combinations with no detected axe WCAG 2 A/AA violations or page exceptions/overflow. Tested permission/fullscreen gates, setup state retention, Back/Forward, mobile keyboard navigation, offline/reconnect and CSV export.
+- Real local API flow verified: create assessment/question, save answer, generate clipboard event, upload and play protected evidence, save a review note/decision, submit and score 5/5. Verified evidence upload 201 precedes submission 200 when submitting during capture. Media devices and liveness response were simulated for UI testing, not an AI accuracy test. Both verification assessments were closed afterward; their attempts/evidence remain in local SQLite.
+- Patched the existing transitive `source-map-js` dependency; npm audit now reports zero vulnerabilities. Local stack is running via `npm run local:start` (ports 5173/5174/8010/8765).
+- Full verification/boundaries in `docs/ui-redesign-verification.md`; regression checks `scripts/check-ui-time.mjs` and `scripts/browser/check-evidence-recorder.js`; screenshots and UI test scripts under ignored `output/playwright/`. Existing ML/report/backend edits were preserved. No deployment or native packaged-app test was performed.
+
+## Assessment Configuration Follow-up — 2026-10-17
+
+- User requested choosing candidates, proctors, and enabled proctoring features during creation. Added searchable multiselect participants and 12 feature controls (`AssessmentSetup.tsx`) to creation; removed automatic default-account assignment. People and Monitoring policy pages load actual saved choices and allow editing/removal.
+- API creates assessment, validated role-specific assignments, and rules atomically. Assessment detail includes saved rules plus participant IDs only for authorized examiners/admins. New `PUT /assessments/{id}/assignments` replaces selections; existing assignment endpoints remain compatible. No schema migration needed.
+- Candidate `proctoring.ts` derives required permissions/setup steps from rule flags. Disabled features skip device access, AI analysis, events, and clipboard restrictions. Phone/liveness imply camera access; camera availability/AI interruption flags follow camera-based features in the form. Backend also rejects disabled event types and disabled screen-recording uploads. Legacy missing keys stay enabled.
+- API suite passes 41 tests, including four new configuration tests. Both builds, strict unused-symbol checks, scoped Ruff (excluding the project's existing FastAPI `B008` convention), and `scripts/check-proctoring-policy.mjs` pass. Real UI/API checks verified persisted explicit selections, assignment removal/addition, policy reload, and a 5/5 submission with all monitoring disabled: zero media/device requests, zero AI requests/events, no fullscreen requirement, clipboard allowed. A phone-only policy adds the required camera gate. Six new desktop/mobile route scans found no axe A/AA violations/overflow.
+- Configuration test assessment ID `72cc2a09-aed8-4813-a62a-72bd02dc1cf8` was closed after verification. Local stack restarted with `scripts/start-local.ps1 -SkipSeed` to load backend changes without reseeding. Detailed behavior/results: `docs/assessment-configuration.md`. Existing ML/report changes remain preserved.
 
 ## Standing Instruction
 
@@ -41,6 +88,7 @@ Completed:
 Next:
 
 - Week 8: proctor review workflow and examiner reporting.
+- Current rebuild direction: use `moodle-proctor` and `AI-Interview-Cheating-Detection` as reference designs only, not direct code sources, because their root licensing is not clearly reusable.
 
 ## Local Services
 
@@ -71,6 +119,54 @@ Seed users:
 - `examiner@example.com / password123`
 
 ## Latest Stabilization Pass
+
+2026-10-06 reference-rebuild start:
+
+- Evaluated `https://github.com/cegit27/moodle-proctor.git` and `https://github.com/aishwaryarumal27-create/AI-Interview-Cheating-Detection.git` for feature parity.
+- Decision: rebuild equivalent behavior inside ProctorAI instead of copying code wholesale, due unclear root repository licensing.
+- Added `docs/production-rebuild-roadmap.md` with the production-grade target architecture, inspired patterns, current gaps, workstreams, and implementation order.
+- Added backend production guardrails:
+  - `APP_ENV=production` now rejects weak/default `JWT_SECRET` values and wildcard CORS origins.
+  - API responses now include baseline security headers, with HSTS enabled in production mode.
+- Fixed live proctoring workflow issues found during manual testing:
+  - candidate now has fallback sending for `FACE_ABSENT` and `MULTIPLE_PERSONS` when the AI sidecar recognizes the condition but does not emit a debounced event;
+  - `PHONE_DETECTED` now sends on a single high-confidence phone sample or after consecutive lower-confidence samples;
+  - clipboard copy/cut/paste can all request rolling video evidence;
+  - proctor dashboard now has review actions for confirmed suspicious, false positive, and inconclusive decisions;
+  - event reviews persist through the API and update event status for the proctor stream;
+  - evidence clips now expose an authenticated fetch-backed download link after loading in the proctor UI.
+- Browser-activity evidence source changed:
+  - candidate now requests screen-capture permission during session setup, before the attempt starts;
+  - browser activity events (`APP_FOCUS_LOST`, `FULLSCREEN_EXIT`, clipboard copy/cut/paste, print screen, devtools shortcuts, and screen-share attempts) use the rolling screen-recording buffer instead of camera clips when permission is granted;
+  - camera/AI events continue using camera rolling clips;
+  - if screen capture is denied, the screen check fails and the candidate cannot start the test;
+  - if screen capture is stopped during the attempt, the screen check is invalidated and the proctor receives a screen-recording-stopped event;
+  - browser activity events no longer attach camera snapshots as fallback evidence.
+- Added connected-device audit in setup:
+  - now checks only for extra monitor / extended display signals;
+  - built-in cameras, microphones, speakers, and Bluetooth devices are allowed and do not block start.
+- Screen recording setup now requests/prefer full display capture:
+  - uses `displaySurface: "monitor"` and related screen-sharing controls where supported;
+  - rejects tab/window selection after the browser returns a stream;
+  - browser security still requires the candidate to approve/select the capture source manually; a web page cannot silently auto-select full display.
+- Useful reference features selected:
+  - Moodle-Proctor style split: exam setup, live proctor dashboard, FastAPI/WebSocket AI sidecar, face/gaze/phone/object/audio/liveness rules.
+  - AI-Interview style browser events: tab/focus, copy/paste, audio anomaly, risk score, rolling event timeline, CSV export.
+- Implemented first rebuild slice:
+  - candidate emits live browser-integrity events for clipboard copy/cut/paste, print screen, devtools shortcuts, and screen-share attempts;
+  - candidate attaches a 30-second rolling risk score to event metadata;
+  - candidate UI shows live risk and browser-integrity demo controls;
+  - proctor dashboard shows live risk, browser-signal count, event filters, per-event risk, and CSV export.
+- This is still a reference-parity rebuild, not a guaranteed production certification. Next hardening targets are persisted review decisions, report export, and stronger hosted deployment.
+- Verification for this pass:
+  - `python -m pytest services/api/tests/test_events.py -q` -> `14 passed`;
+  - `python -m pytest services/api/tests -q` -> `37 passed`;
+  - `python -m pytest services/ai-engine/tests -q` -> `10 passed`;
+  - `npm run build:candidate` -> passed;
+  - `npm run build:web` -> passed;
+  - `npm run local:start` restarted API, AI, web, and candidate services successfully;
+  - live local API smoke created `PHONE_DETECTED`, uploaded/downloaded evidence, and reviewed it as confirmed suspicious.
+  - after screen-evidence/setup-device changes, `npm run build:candidate`, `npm run build:web`, and `python -m pytest services/api/tests/test_events.py -q` passed.
 
 2026-10-01 reliable local mode:
 
@@ -488,6 +584,27 @@ Seed users:
 - Live Postgres-backed smoke could not be rerun in this shell because Docker Desktop's Windows service `com.docker.service` is stopped and Windows refused `Start-Service` without elevated permissions.
 
 ## Verification Baseline
+
+2026-10-13:
+
+- Created `ProctorAI_Phase_1_Report.docx` for the Phase 1 college submission.
+- Report covers problem analysis, literature survey, feasibility, dataset finalization, academic integrity note, and references.
+- Team ID, team member names, and roll numbers are intentionally left as placeholders for the user to fill.
+- Render verification:
+  - Standard bundled LibreOffice renderer was unavailable because `soffice.exe` was not present on PATH.
+  - Used installed Microsoft Word as a fallback to export the DOCX to PDF.
+  - Rasterized the PDF with bundled Poppler and visually checked five rendered pages.
+  - Fixed an unwanted Word title border, re-rendered, and confirmed the final pages looked clean.
+- Created `ProctorAI_Phase_2_Report.docx` using the attached IEEE-style mini project final report template as the format reference.
+- Phase 2 report includes GitHub link `https://github.com/MehulMTyagi/PROCTORAI.git`, abstract, index terms, introduction, literature survey, methodology, experimental-results plan, conclusion, and 15 IEEE-style references.
+- Included identity identification in the final feature scope while avoiding a false claim that unfinished work is already complete.
+- Render verification:
+  - Used installed Microsoft Word as fallback DOCX-to-PDF renderer.
+  - Rasterized with bundled Poppler.
+  - Confirmed final output is 6 pages, within the template's 6-7 page requirement.
+  - Fixed an over-wide architecture figure so it no longer clips in the two-column layout.
+- Updated `ProctorAI_Phase_2_Report.docx` again after user feedback to remove the two-column/book-style layout.
+- Single-column Phase 2 report now renders to 7 pages, still within the template's 6-7 page requirement, and visual checks confirm readable tables and no clipped architecture figure.
 
 Most recent full Week 5 live verification, rerun after the interrupted Week 5 close-out on 2026-09-10:
 

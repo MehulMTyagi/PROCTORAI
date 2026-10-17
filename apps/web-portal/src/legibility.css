@@ -1,0 +1,316 @@
+:root {
+  --muted: #596c86;
+}
+.topbar-breadcrumb {
+  min-width: 0;
+  flex: 1;
+}
+.topbar-breadcrumb > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar-tools {
+  flex-shrink: 0;
+}
+.workspace-content .danger-outline {
+  color: #a3384b;
+}
+.playback-error {
+  color: #a3384b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.success-panel {
+  color: #286f4b;
+}
+.back-link {
+  color: #586b85;
+}
+.person-avatar {
+  color: #46638c;
+}
+.review-queue {
+  max-height: calc(100vh - 255px);
+  min-height: 280px;
+  overflow: auto;
+  position: sticky;
+  top: 20px;
+  scrollbar-width: thin;
+}
+.review-queue .panel-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+}
+@media (max-width: 1050px) {
+  .review-queue {
+    max-height: 350px;
+    min-height: 0;
+    position: static;
+  }
+}
+body {
+  font-size: 14px;
+}
+.page-description {
+  font-size: 14px;
+}
+.nav-item {
+  font-size: 13px;
+}
+.primary-button,
+.secondary-button {
+  font-size: 12px;
+}
+.stat-top > span:first-child {
+  font-size: 12px;
+}
+.stat-card > p {
+  font-size: 11px;
+}
+.table-title small {
+  font-size: 11px;
+}
+.text-button {
+  font-size: 13px;
+}
+td {
+  font-size: 12px;
+}
+th {
+  font-size: 11px;
+}
+.welcome-card > p:not(.eyebrow) {
+  font-size: 13px;
+  max-width: 360px;
+}
+.welcome-card > .primary-button {
+  font-size: 12px;
+}
+.workflow-item strong {
+  font-size: 13px;
+}
+.workflow-item p {
+  font-size: 12px;
+}
+.eyebrow {
+  font-size: 10px;
+}
+.form-stack label {
+  font-size: 13px;
+}
+.form-stack input,
+.form-stack textarea,
+.form-stack select {
+  font-size: 14px;
+}
+.panel-header p {
+  font-size: 12px;
+}
+.simple-steps strong {
+  font-size: 13px;
+}
+.simple-steps p {
+  font-size: 12px;
+}
+.policy-row strong {
+  font-size: 12px;
+}
+.policy-row small {
+  font-size: 11px;
+}
+.person-row strong {
+  font-size: 13px;
+}
+.person-row div > span {
+  font-size: 12px;
+}
+.queue-item > strong {
+  font-size: 13px;
+}
+.queue-item > span,
+.queue-item > small {
+  font-size: 11px;
+}
+.review-decision > p,
+.evidence-note {
+  font-size: 12px;
+}
+.review-actions button {
+  font-size: 11px;
+}
+.empty-state p {
+  font-size: 13px;
+}
+.help-card p {
+  font-size: 13px;
+}
+.export-card p {
+  font-size: 13px;
+}
+.workspace-footer {
+  font-size: 10px;
+}
+.topbar-breadcrumb > span,
+.topbar-breadcrumb strong,
+.workspace-content .eyebrow,
+.workspace-content .page-description,
+.workspace-content .panel-header p,
+.workspace-content .stat-top > span:first-child,
+.workspace-content .stat-card > p,
+.workspace-content .welcome-card > p,
+.workspace-content .workflow-item p,
+.workspace-content .table-title small,
+.workspace-content th,
+.workspace-content td,
+.workspace-content .form-step,
+.workspace-content .simple-steps p,
+.workspace-content .aside-note,
+.workspace-content .step-number,
+.workspace-content .table-footer,
+.workspace-content .page-tabs a,
+.workspace-content .assessment-banner .with-icon > div > span,
+.workspace-content .person-row div > span,
+.workspace-content .panel-description,
+.workspace-content .policy-row small,
+.workspace-content .advanced-settings summary,
+.workspace-content .context-bar > div,
+.workspace-content .assessment-picker > span,
+.workspace-content .empty-state p,
+.workspace-content .queue-item-top time,
+.workspace-content .queue-item > span,
+.workspace-content .queue-item > small,
+.workspace-content .event-context > div > span,
+.workspace-content .event-context strong,
+.workspace-content .evidence-placeholder,
+.workspace-content .evidence-placeholder strong,
+.workspace-content .evidence-note,
+.workspace-content .review-decision > p,
+.workspace-content .review-history > div,
+.workspace-content .review-history p,
+.workspace-content .category-row strong,
+.workspace-content .category-row span,
+.workspace-content .export-card p,
+.workspace-content .export-card small,
+.workspace-content .help-card p,
+.workspace-content .notice,
+.workspace-content .proof-image figcaption,
+.workspace-content .evidence-clip small,
+.workspace-content .evidence-clip code,
+.workspace-content .question-labels,
+.workspace-content .question-options > span,
+.workspace-content .question-index,
+.workspace-content .optional,
+.workspace-footer,
+.workspace-footer a {
+  color: #586b85;
+}
+.workspace-content .welcome-card > .eyebrow {
+  color: #516d97;
+}
+.workspace-content .page-tabs a.active {
+  color: #2563eb;
+}
+.workspace-content .segmented button {
+  color: #5b6d87;
+}
+.workspace-content .segmented button.active {
+  color: #2858aa;
+}
+.workspace-content .segmented button > span,
+.count-badge,
+.page-tabs a > span {
+  color: #526b91;
+}
+.connection.healthy {
+  color: #327255;
+}
+.badge {
+  font-size: 10px;
+}
+.badge-green {
+  color: #237153;
+}
+.badge-amber {
+  color: #87601d;
+}
+.badge-red {
+  color: #a94153;
+}
+.badge-neutral {
+  color: #52657e;
+}
+.avatar,
+.top-avatar {
+  color: #36547e;
+}
+.question-options > span.correct {
+  color: #237153;
+}
+.review-history .badge-green {
+  color: #237153;
+}
+.evidence-download {
+  color: #245cb7;
+}
+.search-field input::placeholder,
+input::placeholder,
+textarea::placeholder {
+  color: #65758c;
+  opacity: 1;
+}
+.text-link {
+  color: #245ec0;
+}
+.skip-link {
+  min-height: 44px;
+}
+.icon-button {
+  min-height: 40px;
+}
+.person-row .small {
+  min-height: 40px;
+}
+.segmented button {
+  min-height: 40px;
+}
+@media (max-width: 520px) {
+  .nav-item {
+    font-size: 13px;
+  }
+  .stat-top > span:first-child {
+    font-size: 11px;
+  }
+  .stat-card > p {
+    font-size: 10px;
+  }
+  .page-description {
+    font-size: 13px;
+  }
+  .welcome-card > p:not(.eyebrow) {
+    font-size: 13px;
+  }
+  .workflow-item strong {
+    font-size: 13px;
+  }
+  .workflow-item p {
+    font-size: 11px;
+  }
+  .help-card p {
+    font-size: 13px;
+  }
+  .workspace-footer {
+    font-size: 9px;
+  }
+  .segmented button {
+    font-size: 11px;
+  }
+  .form-stack input,
+  .form-stack textarea,
+  .form-stack select {
+    font-size: 16px;
+  }
+}

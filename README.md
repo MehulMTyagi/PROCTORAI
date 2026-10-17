@@ -6,6 +6,8 @@ The system is designed around a privacy-aware workflow: the candidate app perfor
 
 ## Scope
 
+The operational UI has separate examiner, proctor, and candidate pages. With the local stack running, open the [examiner workspace](http://127.0.0.1:5173/#/examiner/overview), [proctor workspace](http://127.0.0.1:5173/#/proctor/monitoring), or [candidate dashboard](http://127.0.0.1:5174/#/dashboard). See [UI redesign verification](docs/ui-redesign-verification.md) for routes, browser checks, and deployment boundaries.
+
 Core clients:
 
 - Candidate Windows desktop application.
@@ -186,6 +188,8 @@ Week 6 verification:
 - Live local smoke confirms event creation, evidence upload, SHA-256 metadata, and protected proctor download.
 
 Week 7 is complete: YOLO phone detection now suppresses duplicate active phone events, the candidate setup flow includes a randomized active liveness challenge verified by the local AI sidecar, liveness uses a longer ten-frame capture with motion fallback for real webcam variance, `LIVENESS_FAILED` events are supported with proof/evidence, and default proctoring rules include phone and liveness signals.
+
+The separate [ML training workflow](docs/ml-training.md) trains a small phone/object-crop classifier from random weights using labeled COCO crops. It records source-separated train/validation/test splits, learned weights and measured evaluation artifacts for the college project's model-training requirement.
 
 Week 7 verification:
 

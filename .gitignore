@@ -37,3 +37,6 @@ output/
 *.onnx
 *.pt
 *.pth
+
+# Reproducible ML experiment artifacts (large manifests, charts, checkpoints)
+models/phone-classifier/

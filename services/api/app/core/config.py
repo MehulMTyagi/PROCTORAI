@@ -2,7 +2,7 @@ from functools import lru_cache
 
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     app_name: str = "ProctorAI API"
     app_version: str = "0.1.0"
+    app_env: str = "development"
     api_prefix: str = "/api/v1"
 
     database_url: str = "postgresql+psycopg://proctorai:proctorai@localhost:5432/proctorai"
@@ -41,6 +42,15 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @model_validator(mode="after")
+    def validate_production_settings(self) -> "Settings":
+        if self.app_env.lower() in {"production", "prod"}:
+            if self.jwt_secret in {"CHANGE_ME", "changeme", "dev", "secret"} or len(self.jwt_secret) < 32:
+                raise ValueError("JWT_SECRET must be set to a strong 32+ character value in production")
+            if "*" in self.cors_origins:
+                raise ValueError("CORS_ORIGINS cannot contain '*' in production")
+        return self
 
 
 @lru_cache

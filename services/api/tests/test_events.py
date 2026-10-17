@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.security import hash_password
 from app.models.assessment import Assessment, AssessmentProctor
 from app.models.attempt import Attempt
-from app.models.enums import AssessmentStatus, AttemptStatus, EvidenceStatus, UserRole
+from app.models.enums import AssessmentStatus, AttemptStatus, EventStatus, EvidenceStatus, ReviewDecision, UserRole
 from app.models.evidence import EvidenceFile
 from app.models.integrity_event import IntegrityEvent
 from app.models.user import User
@@ -347,6 +347,67 @@ def test_candidate_can_mark_evidence_failed(
     payload = response.json()
     assert payload["evidence_status"] == EvidenceStatus.FAILED.value
     assert payload["metadata"]["evidence_failure"]["reason"] == "clip_upload_failed"
+
+
+def test_proctor_can_review_integrity_event(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    assessment, attempt = _create_attempt(db_session)
+    event = IntegrityEvent(
+        attempt_id=attempt.id,
+        event_type="PHONE_DETECTED",
+        status=EventStatus.UNREVIEWED.value,
+        severity="HIGH",
+        priority_score=9,
+        payload={"source": "review-test"},
+    )
+    db_session.add(event)
+    db_session.commit()
+    db_session.refresh(event)
+
+    proctor_token = _token(client, "proctor@example.com")
+    response = client.post(
+        f"/proctor/events/{event.id}/reviews",
+        headers={"Authorization": f"Bearer {proctor_token}"},
+        json={
+            "decision": ReviewDecision.CONFIRMED_SUSPICIOUS.value,
+            "note": "Phone visible in evidence.",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["assessment_id"] == str(assessment.id)
+    assert payload["status"] == EventStatus.CONFIRMED.value
+    assert payload["reviews"][0]["decision"] == ReviewDecision.CONFIRMED_SUSPICIOUS.value
+    assert payload["reviews"][0]["note"] == "Phone visible in evidence."
+
+
+def test_candidate_cannot_review_integrity_event(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _, attempt = _create_attempt(db_session)
+    event = IntegrityEvent(
+        attempt_id=attempt.id,
+        event_type="FACE_ABSENT",
+        status=EventStatus.UNREVIEWED.value,
+        severity="HIGH",
+        priority_score=8,
+        payload={"source": "review-test"},
+    )
+    db_session.add(event)
+    db_session.commit()
+
+    candidate_token = _token(client, "candidate@example.com")
+    response = client.post(
+        f"/proctor/events/{event.id}/reviews",
+        headers={"Authorization": f"Bearer {candidate_token}"},
+        json={"decision": ReviewDecision.FALSE_POSITIVE.value},
+    )
+
+    assert response.status_code == 403
 
 
 def test_non_candidate_cannot_create_attempt_event(

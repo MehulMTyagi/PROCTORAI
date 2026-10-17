@@ -1,0 +1,8 @@
+# Install alongside the AI engine: python -m pip install -r requirements-training.txt
+# Runtime inference dependencies remain in pyproject.toml.
+torch>=2.6,<3
+numpy>=2,<3
+Pillow>=10,<13
+scikit-learn>=1.6,<2
+requests>=2.32,<3
+matplotlib>=3.9,<4
