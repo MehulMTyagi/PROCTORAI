@@ -1,6 +1,6 @@
 # ProctorAI Chat Context
 
-Last updated: 2026-10-17
+Last updated: 2026-10-19
 
 ## Chat Recovery — 2026-10-17
 
@@ -48,6 +48,13 @@ Last updated: 2026-10-17
 - Candidate `proctoring.ts` derives required permissions/setup steps from rule flags. Disabled features skip device access, AI analysis, events, and clipboard restrictions. Phone/liveness imply camera access; camera availability/AI interruption flags follow camera-based features in the form. Backend also rejects disabled event types and disabled screen-recording uploads. Legacy missing keys stay enabled.
 - API suite passes 41 tests, including four new configuration tests. Both builds, strict unused-symbol checks, scoped Ruff (excluding the project's existing FastAPI `B008` convention), and `scripts/check-proctoring-policy.mjs` pass. Real UI/API checks verified persisted explicit selections, assignment removal/addition, policy reload, and a 5/5 submission with all monitoring disabled: zero media/device requests, zero AI requests/events, no fullscreen requirement, clipboard allowed. A phone-only policy adds the required camera gate. Six new desktop/mobile route scans found no axe A/AA violations/overflow.
 - Configuration test assessment ID `72cc2a09-aed8-4813-a62a-72bd02dc1cf8` was closed after verification. Local stack restarted with `scripts/start-local.ps1 -SkipSeed` to load backend changes without reseeding. Detailed behavior/results: `docs/assessment-configuration.md`. Existing ML/report changes remain preserved.
+
+## Team Viva Guide — 2026-10-19
+
+- Read the supplied university framework `C:/Users/Mehul/Downloads/CBCA301_Framework_Capstone_Project (2).docx` through Milestone 1 and compared it with the master specification and current Desktop `phase1 report.docx` / `phase2 report.docx`. Current Desktop reports identify Team ID 58 with Mehul Mohan Tyagi (S24BCAU0044) and Yash Kumar (S24BCAU0072); official group approval/consent/submission status remains unverified.
+- Framework: M0 mandatory qualifying approval (4 September 2026); M1 proposal/requirements/feasibility, 30 marks (18 October 2026); M2 9 November; final guide/panel evaluation 23 November. M1 does not list completed training as a deliverable; the user's separate from-scratch requirement still applies. Group-size text conflicts (4 in section 2 vs 3 in section 6.2); the recorded two-person team fits both.
+- User requested a shareable PDF so teammates can understand the project and prepare for viva. Created `output/pdf/ProctorAI_Team_Project_and_Viva_Guide.pdf`: 15 pages, architecture diagram, 17-item M1 checklist, requirements, actual/remaining feature status, model/dataset explanations, measured scratch-model results, privacy/risks, explicitly proposed WBS/team split, demo instructions, sources and 27 viva questions with answers. Future work/ownership is labeled proposed, not a claim about past contributions. Guide evidence is based on recorded 17 October verification, not a new test run on 19 October.
+- Generated using bundled ReportLab; rendered with bundled Poppler and visually inspected all pages. Verified 15 section pages, correct navigation bookmarks, text bounds and metric values. PDF-only deliverable; no original university/report DOCX was edited. Builder/QA files are under `tmp/pdfs/`.
 
 ## Standing Instruction
 

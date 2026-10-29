@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import ForeignKey, JSON, String, Uuid
+from sqlalchemy import JSON, ForeignKey, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base_class import Base, TimestampedUuidMixin

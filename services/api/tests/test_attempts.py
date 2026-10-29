@@ -1,10 +1,14 @@
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from uuid import UUID
 
 from app.db.seed import upsert_dev_assessment, upsert_dev_users
 from app.models.assessment import Assessment
+from app.models.attempt import Attempt
+from app.models.enums import EvidenceStatus
+from app.models.integrity_event import IntegrityEvent
 from app.models.question import Question
 from app.models.session_health import SessionHeartbeat
 
@@ -62,6 +66,14 @@ def test_candidate_can_start_save_and_submit_attempt(
     )
     assert answer_response.status_code == 200
 
+    pending_event = IntegrityEvent(
+        attempt_id=UUID(start_response.json()["attempt_id"]),
+        event_type="FACE_ABSENT",
+        evidence_status=EvidenceStatus.PENDING.value,
+    )
+    db_session.add(pending_event)
+    db_session.commit()
+
     submit_response = client.post(
         f"/attempts/{attempt_id}/submit",
         headers={"Authorization": f"Bearer {token}"},
@@ -71,6 +83,31 @@ def test_candidate_can_start_save_and_submit_attempt(
     assert submit_response.json()["status"] == "SUBMITTED"
     assert submit_response.json()["score"] == 5
     assert submit_response.json()["total_points"] == 10
+    db_session.refresh(pending_event)
+    assert pending_event.evidence_status == EvidenceStatus.FAILED.value
+
+    retake_response = client.post(
+        "/attempts/start",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"assessment_id": str(assessment.id)},
+    )
+    assert retake_response.status_code == 409
+    candidate_id = UUID(
+        client.get("/auth/me", headers={"Authorization": f"Bearer {token}"}).json()["id"]
+    )
+    saved_attempt = db_session.scalar(
+        select(Attempt).where(
+            Attempt.assessment_id == assessment.id,
+            Attempt.candidate_id == candidate_id,
+        )
+    )
+    assert saved_attempt is not None
+    assert saved_attempt.status == "SUBMITTED"
+
+    listed_assessment = client.get(
+        "/assessments", headers={"Authorization": f"Bearer {token}"}
+    ).json()[0]
+    assert listed_assessment["attempt_status"] == "SUBMITTED"
 
 
 def test_candidate_can_record_session_heartbeat(

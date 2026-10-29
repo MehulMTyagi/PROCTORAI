@@ -3,13 +3,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.assessment import Assessment, AssessmentCandidate
 from app.models.attempt import Answer, Attempt
-from app.models.enums import AttemptStatus, QuestionType, UserRole
+from app.models.enums import AttemptStatus, EvidenceStatus, QuestionType, UserRole
+from app.models.integrity_event import IntegrityEvent
 from app.models.question import Question
 from app.models.session_health import SessionHeartbeat
 from app.models.user import User
@@ -17,10 +19,10 @@ from app.schemas.attempts import (
     AnswerResponse,
     AnswerSaveRequest,
     AttemptDetailResponse,
-    SessionHeartbeatCreate,
-    SessionHeartbeatResponse,
     AttemptStartRequest,
     AttemptStartResponse,
+    SessionHeartbeatCreate,
+    SessionHeartbeatResponse,
     SubmitResponse,
 )
 
@@ -69,12 +71,33 @@ def start_attempt(
             started_at=datetime.now(UTC),
         )
         db.add(attempt)
-    elif attempt.status != AttemptStatus.SUBMITTED.value:
+    elif attempt.status == AttemptStatus.SUBMITTED.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This assessment has already been submitted",
+        )
+    else:
         attempt.status = AttemptStatus.IN_PROGRESS.value
         if attempt.started_at is None:
             attempt.started_at = datetime.now(UTC)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        attempt = db.scalar(
+            select(Attempt).where(
+                Attempt.assessment_id == payload.assessment_id,
+                Attempt.candidate_id == current_user.id,
+            )
+        )
+        if attempt is None:
+            raise error
+        if attempt.status == AttemptStatus.SUBMITTED.value:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This assessment has already been submitted",
+            ) from error
     db.refresh(attempt)
     return AttemptStartResponse(
         attempt_id=attempt.id,
@@ -183,6 +206,21 @@ def submit_attempt(
     attempt.status = AttemptStatus.SUBMITTED.value
     attempt.submitted_at = datetime.now(UTC)
     attempt.score = score
+    for event in db.scalars(
+        select(IntegrityEvent).where(
+            IntegrityEvent.attempt_id == attempt.id,
+            IntegrityEvent.evidence_status == EvidenceStatus.PENDING.value,
+        )
+    ):
+        event.evidence_status = EvidenceStatus.FAILED.value
+        event.payload = {
+            **(event.payload or {}),
+            "evidence_failure": {
+                "reason": "evidence_not_saved_before_submission",
+                "detail": "The evidence clip was not saved before the assessment was submitted.",
+                "failed_at": datetime.now(UTC).isoformat(),
+            },
+        }
     db.commit()
     db.refresh(attempt)
 

@@ -1,9 +1,13 @@
 """Protect the experiment's held-out evaluation and saved-model inference contract."""
 
+import base64
 import copy
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
+import cv2
+import numpy as np
 import pytest
 import torch
 from PIL import Image
@@ -12,6 +16,8 @@ pytest.importorskip("sklearn", reason="Install requirements-training.txt for tra
 pytest.importorskip("matplotlib", reason="Install requirements-training.txt for training checks")
 
 from app.phone_classifier import PhoneCropCNN, classify_crop
+from app.phone_classifier_runtime import PhoneCropVerifier
+from app.vision import YoloObjectDetector
 
 ROOT = Path(__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location(
@@ -74,3 +80,55 @@ def test_inference_uses_the_saved_validation_threshold(tmp_path):
     checkpoint["threshold"] = 0.4
     torch.save(checkpoint, model_path)
     assert classify_crop(image_path, model_path)["label"] == "cell_phone"
+
+
+def test_runtime_verifier_loads_the_bundled_scratch_checkpoint():
+    verifier = PhoneCropVerifier()
+    result = verifier.predict(Image.new("RGB", (48, 80), "gray"))
+    assert result["model"] == "PhoneCropCNN-v1"
+    assert result["label"] in {"cell_phone", "other_object"}
+    assert 0 <= result["phone_score"] <= 1
+    assert result["threshold"] == pytest.approx(0.41)
+
+
+def test_yolo_phone_box_is_passed_to_scratch_classifier():
+    detector = YoloObjectDetector()
+    image = np.full((100, 120, 3), 127, dtype=np.uint8)
+    ok, encoded = cv2.imencode(".jpg", image)
+    assert ok
+    crop_sizes = []
+    detector._load_model = lambda: SimpleNamespace(
+        predict=lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                names={0: "cell phone"},
+                boxes=[
+                    SimpleNamespace(
+                        cls=torch.tensor([0]),
+                        conf=torch.tensor([0.9]),
+                        xyxy=torch.tensor([[10, 15, 50, 75]]),
+                    )
+                ],
+            )
+        ]
+    )
+
+    def score_crop(crop):
+        crop_sizes.append(crop.size)
+        return {
+            "model": "PhoneCropCNN-v1",
+            "label": "other_object",
+            "phone_score": 0.3,
+            "threshold": 0.41,
+        }
+
+    detector.phone_crop_verifier.predict = score_crop
+    result = detector.detect_objects(
+        "data:image/jpeg;base64," + base64.b64encode(encoded).decode("ascii"),
+        min_confidence=0.12,
+        max_detections=20,
+        phone_like_classes={"cell phone"},
+    )
+
+    assert crop_sizes == [(40, 60)]
+    assert result[0].phone_like is True  # The second opinion does not suppress YOLO.
+    assert result[0].scratch_classifier["label"] == "other_object"

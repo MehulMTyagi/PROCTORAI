@@ -2,7 +2,7 @@ from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -11,6 +11,7 @@ from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 from app.models.enums import UserRole
+from app.models.teaching_group import TeachingGroupAssignment
 from app.models.user import User
 
 
@@ -32,6 +33,10 @@ def db_session() -> Generator[Session, None, None]:
                     full_name="Dev Candidate",
                     role=UserRole.CANDIDATE.value,
                     password_hash=hash_password("password123"),
+                    roll_number="S24BCAU9000",
+                    program="BCA",
+                    admission_year=2024,
+                    section="A",
                 ),
                 User(
                     email="proctor@example.com",
@@ -45,7 +50,24 @@ def db_session() -> Generator[Session, None, None]:
                     role=UserRole.EXAMINER.value,
                     password_hash=hash_password("password123"),
                 ),
+                User(
+                    email="admin@example.com",
+                    full_name="Dev Admin",
+                    role=UserRole.ADMIN.value,
+                    password_hash=hash_password("password123"),
+                ),
             ]
+        )
+        session.flush()
+        examiner = session.scalar(select(User).where(User.email == "examiner@example.com"))
+        assert examiner is not None
+        session.add(
+            TeachingGroupAssignment(
+                examiner_id=examiner.id,
+                program="BCA",
+                admission_year=2024,
+                section="A",
+            )
         )
         session.commit()
         yield session

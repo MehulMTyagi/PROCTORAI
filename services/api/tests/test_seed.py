@@ -18,7 +18,7 @@ def test_seed_users_are_idempotent_and_hashed(db_session: Session) -> None:
 
     assert len(matching_users) == len(DEV_USERS)
     assert all(user.password_hash != "password123" for user in matching_users)
-    assert all(user.password_hash.startswith("pbkdf2_sha256$") for user in matching_users)
+    assert all(user.password_hash.startswith("$argon2id$") for user in matching_users)
 
 
 def test_seed_assessment_creates_vertical_slice_data(db_session: Session) -> None:

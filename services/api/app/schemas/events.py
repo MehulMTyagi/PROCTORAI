@@ -1,12 +1,13 @@
+import json
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db.base_class import utc_now
+from app.models.enums import EvidenceStatus, IntegrityEventType, ReviewDecision, Severity
 from app.models.evidence import EvidenceFile
-from app.models.enums import EvidenceStatus, ReviewDecision, Severity
 from app.models.integrity_event import IntegrityEvent
 from app.models.review import EventReview
 
@@ -48,13 +49,20 @@ class EvidenceFileResponse(BaseModel):
 
 
 class IntegrityEventCreate(BaseModel):
-    event_type: str = Field(default="APP_FOCUS_LOST", max_length=64)
-    severity: str = Field(default=Severity.MEDIUM.value, max_length=32)
+    event_type: IntegrityEventType = IntegrityEventType.APP_FOCUS_LOST
+    severity: Severity = Severity.MEDIUM
     confidence: float | None = Field(default=None, ge=0, le=1)
     priority_score: int = Field(default=5, ge=0, le=100)
     occurred_at: datetime = Field(default_factory=utc_now)
-    evidence_status: str = Field(default=EvidenceStatus.NOT_REQUIRED.value, max_length=32)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    evidence_status: EvidenceStatus = EvidenceStatus.NOT_REQUIRED
+    metadata: dict[str, Any] = Field(default_factory=dict, max_length=128)
+
+    @model_validator(mode="after")
+    def bound_metadata_size(self) -> "IntegrityEventCreate":
+        serialized = json.dumps(self.metadata, ensure_ascii=False, default=str)
+        if len(serialized.encode("utf-8")) > 2_500_000:
+            raise ValueError("Event metadata must be no larger than 2.5 MB")
+        return self
 
 
 class EvidenceFailureCreate(BaseModel):
@@ -63,7 +71,7 @@ class EvidenceFailureCreate(BaseModel):
 
 
 class EventReviewCreate(BaseModel):
-    decision: str = Field(default=ReviewDecision.INCONCLUSIVE.value, max_length=32)
+    decision: ReviewDecision = ReviewDecision.INCONCLUSIVE
     note: str | None = Field(default=None, max_length=1000)
 
 

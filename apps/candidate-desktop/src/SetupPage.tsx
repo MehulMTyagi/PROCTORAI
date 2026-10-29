@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -13,15 +13,12 @@ import {
   Mic,
   MonitorCheck,
   RotateCw,
-  ScanFace,
   ShieldCheck,
   XCircle,
 } from "lucide-react";
 import type {
   AssessmentDetail,
   CheckStatus,
-  LivenessPrompt,
-  LivenessSample,
   ReadinessCheck,
   ReadinessKey,
 } from "./types";
@@ -43,30 +40,14 @@ type Props = {
   onSystemCheck: () => Promise<void>;
   onScreenCapture: () => Promise<{ passed: boolean; detail: string }>;
   onDeviceAudit: () => Promise<{ passed: boolean; detail: string }>;
-  onLivenessVerify: (
-    samples: LivenessSample[],
-  ) => Promise<{ passed: boolean; detail: string }>;
+  onIdentityVerify: (
+    frameDataUrl: string,
+  ) => Promise<{ passed: boolean; detail: string; similarity: number | null }>;
   onFullscreen: () => Promise<void>;
   onStart: () => Promise<void>;
 };
 
 type SectionState = "pass" | "pending" | "warning" | "fail" | "denied";
-
-const livenessChallenges: { label: string; prompt: LivenessPrompt }[] = [
-  { label: "Blink once", prompt: "BLINK" },
-  { label: "Turn your head left", prompt: "TURN_LEFT" },
-  { label: "Turn your head right", prompt: "TURN_RIGHT" },
-];
-
-function shuffledChallenges() {
-  const items = [...livenessChallenges];
-  const random = crypto.getRandomValues(new Uint32Array(items.length));
-  for (let index = items.length - 1; index > 0; index -= 1) {
-    const swapIndex = random[index] % (index + 1);
-    [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
-  }
-  return items;
-}
 
 function isDenied(check: ReadinessCheck) {
   return (
@@ -139,18 +120,21 @@ export default function SetupPage(props: Props) {
   const { checks, consent, onCheck } = props;
   const [testing, setTesting] = useState(false);
   const [level, setLevel] = useState(0);
-  const [challengeOrder, setChallengeOrder] = useState(() =>
-    shuffledChallenges(),
-  );
-  const [challengeIndex, setChallengeIndex] = useState(0);
-  const [challengeSamples, setChallengeSamples] = useState<LivenessSample[]>(
-    [],
-  );
   const camera = useRef<MediaStream | null>(null);
+  const identityVideo = useRef<HTMLVideoElement | null>(null);
   const microphone = useRef<MediaStream | null>(null);
-  const livenessVideo = useRef<HTMLVideoElement | null>(null);
-  const livenessCanvas = useRef<HTMLCanvasElement | null>(null);
   const generation = useRef(0);
+  const attachCameraPreview = useCallback((node: HTMLVideoElement | null) => {
+    if (!node || !camera.current) return;
+    if (node.srcObject !== camera.current) node.srcObject = camera.current;
+    if (node.paused) void node.play().catch(() => {});
+  }, []);
+  const attachIdentityPreview = useCallback((node: HTMLVideoElement | null) => {
+    identityVideo.current = node;
+    if (!node || !camera.current) return;
+    if (node.srcObject !== camera.current) node.srcObject = camera.current;
+    if (node.paused) void node.play().catch(() => {});
+  }, []);
   const pass = (key: ReadinessKey) =>
     checks.some((check) => check.key === key && check.status === "pass");
   const busy = props.busy || testing;
@@ -181,6 +165,11 @@ export default function SetupPage(props: Props) {
       state: groupStatus(checks.filter((check) => check.key === "camera")),
     },
     {
+      id: "identity",
+      label: "Student identity",
+      state: groupStatus(checks.filter((check) => check.key === "identity")),
+    },
+    {
       id: "microphone",
       label: "Microphone",
       state: groupStatus(checks.filter((check) => check.key === "microphone")),
@@ -190,21 +179,17 @@ export default function SetupPage(props: Props) {
       label: "Connected devices",
       state: groupStatus(checks.filter((check) => check.key === "devices")),
     },
-    {
-      id: "liveness",
-      label: "Liveness",
-      state: groupStatus(checks.filter((check) => check.key === "liveness")),
-    },
     { id: "review", label: "Final review", state: groupStatus(requiredChecks) },
   ];
   const sections = allSections.filter(
     (section) =>
-      !["screen", "camera", "microphone", "devices", "liveness"].includes(
+      !["screen", "camera", "identity", "microphone", "devices"].includes(
         section.id,
       ) ||
       required[
         section.id as
-          "screen" | "camera" | "microphone" | "devices" | "liveness"
+          "screen" | "camera" | "microphone" | "devices"
+          | "identity"
       ],
   );
   const doneCount = sections.filter(
@@ -244,19 +229,17 @@ export default function SetupPage(props: Props) {
     microphone.current = null;
     setTesting(false);
     onCheck("camera", "pending", "Not checked");
+    onCheck("identity", "pending", "University reference not checked");
     onCheck("microphone", "pending", "Not checked");
     onCheck("screen", "pending", "Not checked");
     onCheck("devices", "pending", "Not checked");
-    onCheck("liveness", "pending", "Not checked");
-    setChallengeOrder(shuffledChallenges());
-    setChallengeIndex(0);
-    setChallengeSamples([]);
   }, [consent]);
 
   useEffect(() => {
-    if (!livenessVideo.current || !camera.current) return;
-    livenessVideo.current.srcObject = camera.current;
-    void livenessVideo.current.play().catch(() => {});
+    const video = identityVideo.current;
+    if (!video || !camera.current) return;
+    if (video.srcObject !== camera.current) video.srcObject = camera.current;
+    if (video.paused) void video.play().catch(() => {});
   }, [checks.find((check) => check.key === "camera")?.status]);
 
   useEffect(() => {
@@ -376,16 +359,6 @@ export default function SetupPage(props: Props) {
         track.label ||
           `${kind === "camera" ? "Camera" : "Microphone"} input available`,
       );
-      if (kind === "camera") {
-        onCheck(
-          "liveness",
-          "pending",
-          "Run the liveness challenge after the camera check.",
-        );
-        setChallengeOrder(shuffledChallenges());
-        setChallengeIndex(0);
-        setChallengeSamples([]);
-      }
     } catch (error) {
       if (request !== generation.current) return;
       const message =
@@ -443,108 +416,37 @@ export default function SetupPage(props: Props) {
     }
   }
 
-  async function captureFrameBurst() {
-    const video = livenessVideo.current;
-    const canvas = livenessCanvas.current;
-    if (
-      !video ||
-      !canvas ||
-      video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
-    )
-      return [];
-
-    canvas.width = 224;
-    canvas.height = 168;
-    const context = canvas.getContext("2d");
-    if (!context) return [];
-
-    const frames: string[] = [];
-    for (let index = 0; index < 10; index += 1) {
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      frames.push(canvas.toDataURL("image/jpeg", 0.58));
-      await new Promise((resolve) => window.setTimeout(resolve, 300));
+  async function verifyStudentIdentity() {
+    const video = identityVideo.current;
+    if (!camera.current || !pass("camera") || !video) {
+      onCheck("identity", "fail", "Enable your camera before verifying identity.");
+      return;
     }
-    return frames;
-  }
-
-  async function captureLivenessFrame() {
-    if (!camera.current || !pass("camera")) {
-      onCheck("liveness", "fail", "Run the camera check before liveness.");
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      onCheck("identity", "fail", "Camera preview is not ready. Retry the camera check.");
       return;
     }
 
     setTesting(true);
-    if (
-      !livenessVideo.current ||
-      livenessVideo.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
-    ) {
-      onCheck(
-        "liveness",
-        "fail",
-        "Live camera preview is not ready. Reopen the liveness step and retry.",
-      );
-      setTesting(false);
-      return;
-    }
-
+    onCheck("identity", "pending", "Comparing your camera image with your university photo...");
     try {
-      const frames = await captureFrameBurst();
-      if (frames.length < 6)
-        throw new Error("Could not capture enough live frames.");
-      const nextSamples = [
-        ...challengeSamples,
-        {
-          prompt: challengeOrder[challengeIndex].prompt,
-          frame_data_urls: frames,
-        },
-      ];
-
-      if (nextSamples.length >= challengeOrder.length) {
-        const result = await props.onLivenessVerify(nextSamples);
-        if (!result.passed) {
-          onCheck("liveness", "fail", result.detail);
-          setChallengeIndex(0);
-          setChallengeSamples([]);
-          return;
-        }
-        onCheck("liveness", "pass", result.detail);
-        setChallengeIndex(challengeOrder.length - 1);
-        setChallengeSamples(nextSamples);
-        return;
-      }
-
-      setChallengeSamples(nextSamples);
-      setChallengeIndex(nextSamples.length);
-      onCheck(
-        "liveness",
-        "pending",
-        `${nextSamples.length} of ${challengeOrder.length} liveness prompts captured.`,
-      );
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.min(video.videoWidth, 640);
+      canvas.height = Math.round((canvas.width / video.videoWidth) * video.videoHeight);
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Could not capture a camera frame.");
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const result = await props.onIdentityVerify(canvas.toDataURL("image/jpeg", 0.8));
+      onCheck("identity", result.passed ? "pass" : "fail", result.detail);
     } catch (error) {
       onCheck(
-        "liveness",
+        "identity",
         "fail",
-        error instanceof Error
-          ? error.message
-          : "Liveness verification failed.",
+        error instanceof Error ? error.message : "Identity verification failed. Retry.",
       );
     } finally {
       setTesting(false);
     }
-  }
-
-  function resetLiveness() {
-    setChallengeOrder(shuffledChallenges());
-    setChallengeIndex(0);
-    setChallengeSamples([]);
-    onCheck("liveness", "pending", "Run the blink and head-turn prompts.");
-  }
-
-  function attachLivenessPreview(node: HTMLVideoElement | null) {
-    livenessVideo.current = node;
-    if (!node || !camera.current) return;
-    node.srcObject = camera.current;
-    void node.play().catch(() => {});
   }
 
   const assessment = props.assessment;
@@ -718,8 +620,8 @@ export default function SetupPage(props: Props) {
                   <h3>Privacy &amp; human review</h3>
                   <p>
                     Camera frames are analyzed locally. Focus changes,
-                    fullscreen exits, connection health, liveness, and
-                    face-check signals may be sent for proctor review. A signal
+                    fullscreen exits, connection health and face-check signals
+                    may be sent for proctor review. A signal
                     is not a misconduct decision. Short evidence clips are
                     uploaded only when an integrity event needs review.
                   </p>
@@ -884,10 +786,7 @@ export default function SetupPage(props: Props) {
                     muted
                     playsInline
                     aria-label="Camera preview"
-                    ref={(node) => {
-                      if (node && camera.current)
-                        node.srcObject = camera.current;
-                    }}
+                    ref={attachCameraPreview}
                   />
                 ) : (
                   <div className="preview-placeholder">
@@ -916,6 +815,59 @@ export default function SetupPage(props: Props) {
                   : pass("camera")
                     ? "Test camera again"
                     : "Enable camera"}
+              </button>
+            </div>
+          </section>
+
+          <section
+            id="setup-identity"
+            hidden={activeSection !== "identity"}
+            className={`setup-section state-${groupStatus(checks.filter((check) => check.key === "identity"))}`}
+          >
+            <header className="section-head">
+              <span className="section-num">
+                {sections.findIndex((section) => section.id === "identity") + 1}
+              </span>
+              <div className="section-title">
+                <h2>Verify your identity</h2>
+                <p>We compare one camera frame with the university photo linked to your signed-in email.</p>
+              </div>
+              <span
+                className={`section-state ${groupStatus(checks.filter((check) => check.key === "identity"))}`}
+              >
+                {stateLabel(groupStatus(checks.filter((check) => check.key === "identity")))}
+              </span>
+            </header>
+            <div className="section-body">
+              <div className="camera-preview">
+                {pass("camera") ? (
+                  <video
+                    autoPlay
+                    muted
+                    playsInline
+                    aria-label="Camera preview for identity check"
+                    ref={attachIdentityPreview}
+                  />
+                ) : (
+                  <div className="preview-placeholder">
+                    <Camera size={34} aria-hidden="true" />
+                    <span>Enable the camera first</span>
+                  </div>
+                )}
+                <span className="preview-label">
+                  <span className={pass("camera") ? "live-dot" : ""} />
+                  Identity check preview
+                </span>
+              </div>
+              <p className="section-note">
+                The check is a one-to-one match to your own university record. It is a review aid, not a decision about misconduct. If it cannot match you, adjust the lighting and retry or contact your proctor.
+              </p>
+              <div className="check-list">
+                <CheckResult check={checks.find((check) => check.key === "identity")!} />
+              </div>
+              <button onClick={() => void verifyStudentIdentity()} disabled={busy || !pass("camera")}>
+                <ShieldCheck size={16} aria-hidden="true" />
+                {testing ? "Checking identity..." : pass("identity") ? "Verify again" : "Verify my identity"}
               </button>
             </div>
           </section>
@@ -1022,99 +974,6 @@ export default function SetupPage(props: Props) {
                     ? "Check devices again"
                     : "Check connected devices"}
               </button>
-            </div>
-          </section>
-
-          <section
-            id="setup-liveness"
-            hidden={activeSection !== "liveness"}
-            className={`setup-section state-${groupStatus(checks.filter((check) => check.key === "liveness"))}`}
-          >
-            <header className="section-head">
-              <span className="section-num">
-                {sections.findIndex((section) => section.id === "liveness") + 1}
-              </span>
-              <div className="section-title">
-                <h2>Liveness</h2>
-                <p>
-                  Complete the randomized live-camera prompts to confirm you are
-                  present.
-                </p>
-              </div>
-              <span
-                className={`section-state ${groupStatus(checks.filter((check) => check.key === "liveness"))}`}
-              >
-                {stateLabel(
-                  groupStatus(
-                    checks.filter((check) => check.key === "liveness"),
-                  ),
-                )}
-              </span>
-            </header>
-            <div className="section-body">
-              <div className="camera-preview">
-                {pass("camera") ? (
-                  <video
-                    autoPlay
-                    muted
-                    playsInline
-                    aria-label="Liveness camera preview"
-                    ref={attachLivenessPreview}
-                  />
-                ) : (
-                  <div className="preview-placeholder">
-                    <ScanFace size={34} aria-hidden="true" />
-                    <span>Camera check required before liveness</span>
-                  </div>
-                )}
-                <span className="preview-label">
-                  <span className={pass("camera") ? "live-dot" : ""} />
-                  Local liveness preview
-                </span>
-                <canvas ref={livenessCanvas} aria-hidden="true" hidden />
-              </div>
-              <div className="liveness-panel">
-                <p className="eyebrow">
-                  Prompt {Math.min(challengeIndex + 1, challengeOrder.length)}{" "}
-                  of {challengeOrder.length}
-                </p>
-                <h3>
-                  {
-                    challengeOrder[
-                      Math.min(challengeIndex, challengeOrder.length - 1)
-                    ].label
-                  }
-                </h3>
-                <p>
-                  {pass("liveness")
-                    ? "Challenge complete."
-                    : testing
-                      ? "Sampling now. Keep the movement visible until the button unlocks."
-                      : "Click capture, then perform the prompt slowly for about three seconds."}
-                </p>
-              </div>
-              <div className="check-list">
-                <CheckResult
-                  check={checks.find((check) => check.key === "liveness")!}
-                />
-              </div>
-              <div className="button-row">
-                <button
-                  onClick={() => void captureLivenessFrame()}
-                  disabled={busy || !pass("camera") || pass("liveness")}
-                >
-                  <ScanFace size={16} aria-hidden="true" />
-                  {testing ? "Sampling..." : "Capture prompt"}
-                </button>
-                <button
-                  className="secondary-button"
-                  onClick={resetLiveness}
-                  disabled={busy}
-                >
-                  <RotateCw size={16} aria-hidden="true" />
-                  Reset challenge
-                </button>
-              </div>
             </div>
           </section>
 

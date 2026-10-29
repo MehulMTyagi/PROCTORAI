@@ -1,9 +1,13 @@
 import base64
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
+from io import BytesIO
 
 import cv2
 import numpy as np
+from PIL import Image
+
+from app.phone_classifier_runtime import PhoneCropVerifier
 
 
 @dataclass(frozen=True)
@@ -37,6 +41,7 @@ class ObjectDetection:
     confidence: float
     bbox: list[float]
     phone_like: bool
+    scratch_classifier: dict[str, float | str] | None = None
 
 
 @dataclass(frozen=True)
@@ -174,6 +179,7 @@ class YoloObjectDetector:
         self.model_path = model_path or os.getenv("YOLO_MODEL_PATH", "yolov8n.pt")
         self._model = None
         self._version = "unknown"
+        self.phone_crop_verifier = PhoneCropVerifier()
 
     @property
     def info(self) -> ObjectDetectorInfo:
@@ -216,12 +222,23 @@ class YoloObjectDetector:
             confidence = float(box.conf[0].item())
             class_name = str(names[class_index])
             xyxy = box.xyxy[0].tolist()
+            phone_like = class_name in phone_like_classes
+            scratch_classifier = None
+            if phone_like:
+                x1, y1, x2, y2 = [int(round(value)) for value in xyxy]
+                height, width = image.shape[:2]
+                x1, x2 = max(0, x1), min(width, x2)
+                y1, y2 = max(0, y1), min(height, y2)
+                if x2 > x1 and y2 > y1:
+                    crop = cv2.cvtColor(image[y1:y2, x1:x2], cv2.COLOR_BGR2RGB)
+                    scratch_classifier = self.phone_crop_verifier.predict(Image.fromarray(crop))
             detections.append(
                 ObjectDetection(
                     class_name=class_name,
                     confidence=confidence,
                     bbox=[round(float(value), 2) for value in xyxy],
-                    phone_like=class_name in phone_like_classes,
+                    phone_like=phone_like,
+                    scratch_classifier=scratch_classifier,
                 )
             )
         return detections
@@ -230,7 +247,8 @@ class YoloObjectDetector:
         if self._model is not None:
             return self._model
 
-        from ultralytics import YOLO, __version__ as ultralytics_version
+        from ultralytics import YOLO
+        from ultralytics import __version__ as ultralytics_version
 
         self._version = ultralytics_version
         self._model = YOLO(self.model_path)
@@ -238,12 +256,24 @@ class YoloObjectDetector:
 
 
 def _decode_data_url(frame_data_url: str) -> np.ndarray:
-    if "," in frame_data_url:
-        _, encoded = frame_data_url.split(",", 1)
-    else:
-        encoded = frame_data_url
-
-    raw = base64.b64decode(encoded)
+    try:
+        header, encoded = frame_data_url.split(",", 1)
+        if header not in {"data:image/jpeg;base64", "data:image/png;base64"}:
+            raise ValueError("Frame must be a base64 JPEG or PNG data URL")
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Frame must be a valid base64 JPEG or PNG data URL") from exc
+    if not raw or len(raw) > 1_500_000:
+        raise ValueError("Frame image exceeds the 1.5 MB limit")
+    try:
+        with Image.open(BytesIO(raw)) as image:
+            if image.format not in {"JPEG", "PNG"}:
+                raise ValueError("Frame must be a JPEG or PNG image")
+            if image.width * image.height > 4_194_304:
+                raise ValueError("Frame dimensions exceed the 4 megapixel limit")
+            image.verify()
+    except (OSError, ValueError) as exc:
+        raise ValueError("Frame image is invalid") from exc
     buffer = np.frombuffer(raw, dtype=np.uint8)
     image = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
     if image is None:

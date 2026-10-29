@@ -5,9 +5,9 @@ services:
     environment:
       POSTGRES_DB: proctorai
       POSTGRES_USER: proctorai
-      POSTGRES_PASSWORD: proctorai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-proctorai-local-only}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - proctorai-postgres-data:/var/lib/postgresql/data
     healthcheck:

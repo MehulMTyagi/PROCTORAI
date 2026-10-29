@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.base_class import utc_now
-from app.models.attempt import Answer, Attempt
+from app.models.attempt import Attempt
 from app.models.session_health import SessionHeartbeat
 
 
@@ -20,8 +20,8 @@ class AttemptStartResponse(BaseModel):
 
 class AnswerSaveRequest(BaseModel):
     question_id: UUID
-    answer_text: str | None = None
-    selected_option: str | None = None
+    answer_text: str | None = Field(default=None, max_length=20_000)
+    selected_option: str | None = Field(default=None, max_length=255)
 
 
 class AnswerResponse(BaseModel):
@@ -70,7 +70,7 @@ class SubmitResponse(BaseModel):
 class SessionHeartbeatCreate(BaseModel):
     client_sent_at: datetime = Field(default_factory=utc_now)
     status: str = Field(default="OK", max_length=32)
-    metrics: dict[str, object] = Field(default_factory=dict)
+    metrics: dict[str, object] = Field(default_factory=dict, max_length=64)
 
 
 class SessionHeartbeatResponse(BaseModel):

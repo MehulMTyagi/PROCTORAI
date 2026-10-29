@@ -193,3 +193,34 @@ def test_users_endpoint_filters_roles(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json()[0]["role"] == "CANDIDATE"
+
+
+def test_examiner_is_limited_to_assigned_student_groups(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    outside_candidate = User(
+        email="outside@example.com",
+        full_name="Outside Section Student",
+        role=UserRole.CANDIDATE.value,
+        password_hash=hash_password("password123"),
+        roll_number="S24BCAU9001",
+        program="BCA",
+        admission_year=2024,
+        section="B",
+    )
+    db_session.add(outside_candidate)
+    db_session.commit()
+    token = _token(client, "examiner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    listed = client.get("/users?role=CANDIDATE", headers=headers)
+    assert listed.status_code == 200
+    assert "outside@example.com" not in {person["email"] for person in listed.json()}
+
+    assessment = client.post(
+        "/assessments",
+        headers=headers,
+        json={"title": "Outside group test", "candidate_ids": [str(outside_candidate.id)]},
+    )
+    assert assessment.status_code == 403

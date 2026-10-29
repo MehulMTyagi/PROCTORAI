@@ -32,6 +32,7 @@ import type {
   AssessmentDetail,
   Attempt,
   FaceMonitorState,
+  IdentityMonitorState,
   IntegrityEvent,
   ObjectMonitorState,
   PendingOperation,
@@ -50,6 +51,7 @@ type Props = {
   monitoringActive: boolean;
   sidecarReady: boolean;
   faceMonitor: FaceMonitorState;
+  identityMonitor: IdentityMonitorState;
   objectMonitor: ObjectMonitorState;
   screenMonitor: ScreenMonitorState;
   aiModel: AiModelInfo | null;
@@ -71,7 +73,6 @@ type Props = {
   onFaceDemo: (faceCount: number) => Promise<void>;
   onPhoneDemo: () => void;
   onVoiceDemo: () => void;
-  onLivenessFailedDemo: () => void;
 };
 
 function formatCountdown(ms: number) {
@@ -455,6 +456,21 @@ export default function TestPage(props: Props) {
                   </strong>
                 </li>
                 <li>
+                  <ScanFace size={15} aria-hidden="true" />
+                  <span>Identity</span>
+                  <strong>
+                    {props.identityMonitor.status === "matched"
+                      ? "Verified"
+                      : props.identityMonitor.status === "checking"
+                        ? "Checking"
+                        : props.identityMonitor.status === "review"
+                          ? "Review"
+                          : props.identityMonitor.status === "error"
+                            ? "Error"
+                            : "Waiting"}
+                  </strong>
+                </li>
+                <li>
                   <MonitorUp size={15} aria-hidden="true" />
                   <span>Screen</span>
                   <strong>
@@ -545,6 +561,15 @@ export default function TestPage(props: Props) {
                         ? `${props.aiModel.name} · ${props.faceMonitor.samplesAnalyzed} samples`
                         : props.faceMonitor.detail}
                     </p>
+                    <p className="diag-line" aria-live="polite">
+                      Identity: {props.identityMonitor.detail}
+                      {props.identityMonitor.similarity !== null
+                        ? ` · similarity ${props.identityMonitor.similarity.toFixed(2)}`
+                        : ""}
+                      {props.identityMonitor.checkedAt
+                        ? ` · checked ${new Date(props.identityMonitor.checkedAt).toLocaleTimeString()}`
+                        : ""}
+                    </p>
                     <p className="diag-line">
                       Object:{" "}
                       {props.objectMonitor.confidence === null
@@ -587,14 +612,6 @@ export default function TestPage(props: Props) {
                       >
                         <Volume2 size={14} aria-hidden="true" />
                         Background voice
-                      </button>
-                      <button
-                        className="secondary-button small"
-                        onClick={props.onLivenessFailedDemo}
-                        disabled={!props.monitoringActive}
-                      >
-                        <ScanFace size={14} aria-hidden="true" />
-                        Liveness failed
                       </button>
                     </div>
                   </div>

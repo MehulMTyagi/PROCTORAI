@@ -1,10 +1,11 @@
 # ProctorAI
-f
 ProctorAI is a BCA Semester V capstone project for an AI-native multimodal proctoring and assessment-integrity monitoring system for remote assessments and interviews.
 
 The system is designed around a privacy-aware workflow: the candidate app performs AI monitoring primarily on the candidate's Windows laptop, keeps normal camera/audio data in a bounded rolling buffer, and uploads only short evidence clips or logs when a potential integrity event is detected. A human proctor reviews each event. The system does not make automatic misconduct decisions.
 
 ## Scope
+
+Before any internet-facing deployment, review the [production security and deployment checklist](docs/production-security.md). The local demo and application-level safeguards do not replace a production identity provider, gateway rate limiting, private network design, managed biometric storage, or operational monitoring.
 
 The operational UI has separate examiner, proctor, and candidate pages. With the local stack running, open the [examiner workspace](http://127.0.0.1:5173/#/examiner/overview), [proctor workspace](http://127.0.0.1:5173/#/proctor/monitoring), or [candidate dashboard](http://127.0.0.1:5174/#/dashboard). See [UI redesign verification](docs/ui-redesign-verification.md) for routes, browser checks, and deployment boundaries.
 
@@ -187,7 +188,7 @@ Week 6 verification:
 - Focused regression confirms candidate evidence upload, hash mismatch rejection, proctor protected download, and evidence failure persistence.
 - Live local smoke confirms event creation, evidence upload, SHA-256 metadata, and protected proctor download.
 
-Week 7 is complete: YOLO phone detection now suppresses duplicate active phone events, the candidate setup flow includes a randomized active liveness challenge verified by the local AI sidecar, liveness uses a longer ten-frame capture with motion fallback for real webcam variance, `LIVENESS_FAILED` events are supported with proof/evidence, and default proctoring rules include phone and liveness signals.
+On first authenticated sign-in, a candidate without an identity photo is prompted to capture one. The API permits one photo per account and blocks candidate-side replacement. Admins can still import university photos with a CSV using `email,photo_path` and JPEG/PNG files. The setup liveness challenge has been removed. During an assessment, the local AI sidecar repeats identity comparison every 60 seconds; two consecutive failed checks create a human-review event with camera evidence. First-time self-enrollment binds a face to an account but does not independently prove the person's real-world identity.
 
 The separate [ML training workflow](docs/ml-training.md) trains a small phone/object-crop classifier from random weights using labeled COCO crops. It records source-separated train/validation/test splits, learned weights and measured evaluation artifacts for the college project's model-training requirement.
 

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base_class import Base, TimestampedUuidMixin
@@ -10,6 +10,9 @@ from app.models.enums import AttemptStatus
 
 class Attempt(TimestampedUuidMixin, Base):
     __tablename__ = "attempts"
+    __table_args__ = (
+        UniqueConstraint("assessment_id", "candidate_id", name="uq_attempt_assessment_candidate"),
+    )
 
     assessment_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),

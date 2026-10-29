@@ -10,7 +10,14 @@ from app.core.config import settings
 from app.core.security import hash_password
 from app.models.assessment import Assessment, AssessmentProctor
 from app.models.attempt import Attempt
-from app.models.enums import AssessmentStatus, AttemptStatus, EventStatus, EvidenceStatus, ReviewDecision, UserRole
+from app.models.enums import (
+    AssessmentStatus,
+    AttemptStatus,
+    EventStatus,
+    EvidenceStatus,
+    ReviewDecision,
+    UserRole,
+)
 from app.models.evidence import EvidenceFile
 from app.models.integrity_event import IntegrityEvent
 from app.models.user import User
@@ -238,7 +245,7 @@ def test_candidate_can_upload_evidence_clip_and_proctor_can_download(
     settings.evidence_dir = str(tmp_path)
     assessment, attempt = _create_attempt(db_session)
     candidate_token = _token(client, "candidate@example.com")
-    clip_bytes = b"webm evidence bytes"
+    clip_bytes = b"\x1a\x45\xdf\xa3webm evidence bytes"
     clip_hash = hashlib.sha256(clip_bytes).hexdigest()
 
     create_response = client.post(
@@ -249,6 +256,7 @@ def test_candidate_can_upload_evidence_clip_and_proctor_can_download(
             "severity": "HIGH",
             "priority_score": 9,
             "evidence_status": EvidenceStatus.PENDING.value,
+            "occurred_at": "2000-01-01T00:00:00Z",
             "metadata": {"source": "week6-test"},
         },
     )
@@ -277,6 +285,8 @@ def test_candidate_can_upload_evidence_clip_and_proctor_can_download(
     event = db_session.get(IntegrityEvent, UUID(event_id))
     assert event is not None
     assert event.evidence_status == EvidenceStatus.READY.value
+    assert event.occurred_at.replace(tzinfo=UTC).year > 2020
+    assert event.payload["client_occurred_at"] == "2000-01-01T00:00:00+00:00"
     stored_evidence = db_session.scalar(select(EvidenceFile).where(EvidenceFile.event_id == event.id))
     assert stored_evidence is not None
 
@@ -321,6 +331,32 @@ def test_evidence_upload_rejects_hash_mismatch(
     )
 
     assert response.status_code == 400
+    assert db_session.scalar(select(EvidenceFile)) is None
+
+
+def test_evidence_upload_rejects_video_without_webm_header(
+    client: TestClient,
+    db_session: Session,
+    tmp_path,
+) -> None:
+    settings.evidence_dir = str(tmp_path)
+    _, attempt = _create_attempt(db_session)
+    candidate_token = _token(client, "candidate@example.com")
+    event = client.post(
+        f"/attempts/{attempt.id}/events",
+        headers={"Authorization": f"Bearer {candidate_token}"},
+        json={"event_type": "PHONE_DETECTED", "evidence_status": EvidenceStatus.PENDING.value},
+    ).json()
+    clip_bytes = b"live evidence"
+
+    response = client.post(
+        f"/attempts/{attempt.id}/events/{event['id']}/evidence",
+        headers={"Authorization": f"Bearer {candidate_token}"},
+        data={"kind": "VIDEO", "sha256_hash": hashlib.sha256(clip_bytes).hexdigest()},
+        files={"file": ("phone.webm", clip_bytes, "video/webm")},
+    )
+
+    assert response.status_code == 415
     assert db_session.scalar(select(EvidenceFile)) is None
 
 

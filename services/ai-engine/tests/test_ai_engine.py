@@ -113,6 +113,12 @@ def test_yolo_object_endpoint_reports_phone_event() -> None:
                     "confidence": 0.87,
                     "bbox": [10, 12, 80, 120],
                     "phone_like": True,
+                    "scratch_classifier": {
+                        "model": "PhoneCropCNN-v1",
+                        "label": "cell_phone",
+                        "phone_score": 0.86,
+                        "threshold": 0.41,
+                    },
                 }
             ],
         },
@@ -121,8 +127,10 @@ def test_yolo_object_endpoint_reports_phone_event() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["phone_like_objects"][0]["class_name"] == "cell phone"
+    assert payload["phone_like_objects"][0]["scratch_classifier"]["label"] == "cell_phone"
     assert payload["events"][0]["event_type"] == "PHONE_DETECTED"
     assert payload["events"][0]["metadata"]["detector"] == "ultralytics-yolo"
+    assert payload["events"][0]["metadata"]["scratch_classifier"]["model"] == "PhoneCropCNN-v1"
 
 
 def test_yolo_object_endpoint_ignores_non_phone_objects() -> None:

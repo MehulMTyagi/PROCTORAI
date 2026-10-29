@@ -9,7 +9,7 @@ class WebSocketManager:
         self._connections: dict[str, set[WebSocket]] = defaultdict(set)
 
     async def connect(self, assessment_id: str, websocket: WebSocket) -> None:
-        await websocket.accept()
+        await websocket.accept(subprotocol="proctorai.v1")
         self._connections[assessment_id].add(websocket)
 
     def disconnect(self, assessment_id: str, websocket: WebSocket) -> None:

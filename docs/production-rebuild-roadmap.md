@@ -138,7 +138,7 @@ Acceptance:
 ### 6. AI And Proctoring Quality
 
 - Keep YOLO for phone/object detection.
-- Keep liveness checks, but add calibrated thresholds and human-review language.
+- Verify candidate identity against the university photo at setup and every 60 seconds during an assessment; keep any mismatch as a human-review signal.
 - Add strictness profiles: lenient, moderate, strict.
 - Add detector health telemetry.
 - Add false-positive controls and confidence display.

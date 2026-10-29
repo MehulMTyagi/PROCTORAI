@@ -1,12 +1,14 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.security import hash_password
 from app.db.session import SessionLocal
 from app.models.assessment import Assessment, AssessmentCandidate, AssessmentProctor, ProctoringRule
 from app.models.attempt import Answer, Attempt
 from app.models.enums import AssessmentStatus, AttemptStatus, UserRole
 from app.models.question import Question
+from app.models.teaching_group import TeachingGroupAssignment
 from app.models.user import User
 
 DEV_USERS = [
@@ -28,6 +30,12 @@ DEV_USERS = [
         "role": UserRole.EXAMINER.value,
         "password": "password123",
     },
+    {
+        "email": "admin@example.com",
+        "full_name": "Dev Admin",
+        "role": UserRole.ADMIN.value,
+        "password": "password123",
+    },
 ]
 
 DEV_ASSESSMENT_TITLE = "Week 2 Dummy Event Demo"
@@ -37,20 +45,48 @@ def upsert_dev_users(db: Session) -> None:
     for dev_user in DEV_USERS:
         user = db.scalar(select(User).where(User.email == dev_user["email"]))
         if user is None:
-            db.add(
-                User(
+            user = User(
                     email=dev_user["email"],
                     full_name=dev_user["full_name"],
                     role=dev_user["role"],
                     password_hash=hash_password(dev_user["password"]),
                 )
-            )
+            if dev_user["role"] == UserRole.CANDIDATE.value:
+                user.roll_number = "S24BCAU9000"
+                user.program = "BCA"
+                user.admission_year = 2024
+                user.section = "A"
+            db.add(user)
         else:
             user.full_name = dev_user["full_name"]
             user.role = dev_user["role"]
             user.is_active = True
+            if dev_user["role"] == UserRole.CANDIDATE.value:
+                user.roll_number = "S24BCAU9000"
+                user.program = "BCA"
+                user.admission_year = 2024
+                user.section = "A"
 
     db.commit()
+
+    examiner = db.scalar(select(User).where(User.email == "examiner@example.com"))
+    if examiner is not None and db.scalar(
+        select(TeachingGroupAssignment).where(
+            TeachingGroupAssignment.examiner_id == examiner.id,
+            TeachingGroupAssignment.program == "BCA",
+            TeachingGroupAssignment.admission_year == 2024,
+            TeachingGroupAssignment.section == "A",
+        )
+    ) is None:
+        db.add(
+            TeachingGroupAssignment(
+                examiner_id=examiner.id,
+                program="BCA",
+                admission_year=2024,
+                section="A",
+            )
+        )
+        db.commit()
 
 
 def upsert_dev_assessment(db: Session) -> None:
@@ -123,10 +159,10 @@ def upsert_dev_assessment(db: Session) -> None:
             "phone_frame_threshold": 2,
             "clear_frame_threshold": 3,
         },
-        "LIVENESS_FAILED": {
+        "IDENTITY_MISMATCH": {
             "enabled": True,
             "severity": "HIGH",
-            "challenge_set": ["blink", "turn_left", "turn_right"],
+            "human_review_required": True,
         },
     }
     if rule is None:
@@ -198,10 +234,12 @@ def upsert_dev_assessment(db: Session) -> None:
 
 
 def main() -> None:
+    if settings.app_env.lower() in {"production", "prod"}:
+        raise RuntimeError("Development seed accounts must never be created in production")
     with SessionLocal() as db:
         upsert_dev_users(db)
         upsert_dev_assessment(db)
-    print("Seeded development users: candidate@example.com, proctor@example.com, examiner@example.com")
+    print("Seeded development users: candidate@example.com, proctor@example.com, examiner@example.com, admin@example.com")
 
 
 if __name__ == "__main__":

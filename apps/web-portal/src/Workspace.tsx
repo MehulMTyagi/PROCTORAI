@@ -7,6 +7,7 @@ import {
   ClipboardList,
   FileCheck2,
   LayoutDashboard,
+  LogOut,
   Menu,
   Radio,
   RefreshCw,
@@ -136,6 +137,7 @@ export function Workspace({
   name,
   status,
   onRefresh,
+  onLogout,
   children,
   actions,
 }: {
@@ -145,6 +147,7 @@ export function Workspace({
   name: string;
   status: string;
   onRefresh: () => void;
+  onLogout: () => void;
   children: ReactNode;
   actions?: ReactNode;
 }) {
@@ -350,6 +353,9 @@ export function Workspace({
               disabled={status === "loading"}
             >
               <RefreshCw size={17} />
+            </button>
+            <button className="icon-button" onClick={onLogout} aria-label="Sign out" title="Sign out">
+              <LogOut size={17} />
             </button>
             <span className="top-avatar">
               {name

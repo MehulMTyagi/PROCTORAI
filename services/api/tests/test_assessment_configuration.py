@@ -28,6 +28,10 @@ def test_create_persists_selected_people_and_policy_and_limits_access(
                 full_name=f"Other {role}",
                 role=role,
                 password_hash=hash_password("password123"),
+                roll_number=("S24BCAU0045" if role == "CANDIDATE" else None),
+                program=("BCA" if role == "CANDIDATE" else None),
+                admission_year=(2024 if role == "CANDIDATE" else None),
+                section=("A" if role == "CANDIDATE" else None),
             )
         )
     db_session.commit()

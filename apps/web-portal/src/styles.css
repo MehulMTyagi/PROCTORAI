@@ -2177,3 +2177,92 @@ tbody tr:hover {
     animation: none !important;
   }
 }
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f4f7fc;
+}
+
+.auth-card {
+  display: grid;
+  gap: 16px;
+  width: min(100%, 420px);
+  padding: 32px;
+  border: 1px solid #dbe3ef;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgb(26 45 78 / 10%);
+}
+
+.auth-card h1,
+.auth-card p {
+  margin: 0;
+}
+
+.auth-card > p:not(.eyebrow):not(.auth-error) {
+  color: #607089;
+  line-height: 1.5;
+}
+
+.auth-card label {
+  display: grid;
+  gap: 7px;
+  color: #26364d;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.auth-card input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #cbd6e5;
+  border-radius: 9px;
+  color: #15243a;
+  font: inherit;
+}
+
+.auth-mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 14px;
+  background: #eaf1ff;
+  color: #2459d3;
+}
+
+.auth-error {
+  color: #b4233b;
+}
+
+.auth-card small {
+  color: #607089;
+  text-align: center;
+}
+
+.scratch-model-review {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid #cfdbef;
+  border-radius: 12px;
+  background: #f5f8ff;
+}
+
+.scratch-model-review > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scratch-model-review p,
+.scratch-model-review small {
+  margin: 0;
+  color: #586a84;
+  line-height: 1.45;
+}

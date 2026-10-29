@@ -34,7 +34,7 @@ import {
   Workspace,
   readPortalRoute,
 } from "./Workspace";
-import { serverDate } from "./time";
+import { formatServerDateTime, formatServerTime } from "./time";
 import {
   defaultRules,
   FeatureChoices,
@@ -43,16 +43,13 @@ import {
 } from "./AssessmentSetup";
 import "./assessment-setup.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8010";
-const TUNNEL_BYPASS_HEADERS = { "bypass-tunnel-reminder": "1" };
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL;
+if (import.meta.env.PROD && !configuredApiBase?.startsWith("https://")) {
+  throw new Error("Production builds require VITE_API_BASE_URL to use HTTPS.");
+}
+const API_BASE = configuredApiBase ?? "http://127.0.0.1:8010";
 
 type User = { id: string; email: string; full_name: string; role: string };
-type Bootstrap = {
-  assessment_id: string;
-  assessment_title: string;
-  attempt_id: string | null;
-  role: string;
-};
 type Assessment = {
   id: string;
   title: string;
@@ -123,7 +120,7 @@ type EventProof = {
     size_bytes?: number;
   } | null;
 };
-type Session = { token: string; user: User; bootstrap: Bootstrap };
+type Session = { token: string; user: User };
 type AccountMode = "EXAMINER" | "PROCTOR";
 type EventFilter = "ALL" | "HIGH" | "BROWSER" | "AI" | "EVIDENCE";
 
@@ -137,17 +134,11 @@ class ApiError extends Error {
   }
 }
 
-const accountEmail: Record<AccountMode, string> = {
-  EXAMINER: "examiner@example.com",
-  PROCTOR: "proctor@example.com",
-};
-
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...TUNNEL_BYPASS_HEADERS,
       ...options.headers,
     },
   });
@@ -178,6 +169,29 @@ function metadataRiskScore(event: IntegrityEvent) {
   return Number.isFinite(score) ? score : null;
 }
 
+function scratchClassifierResult(event: IntegrityEvent) {
+  const value = event.metadata?.scratch_classifier;
+  if (!value || typeof value !== "object") return null;
+  const result = value as {
+    model?: unknown;
+    label?: unknown;
+    phone_score?: unknown;
+    threshold?: unknown;
+  };
+  if (
+    result.model !== "PhoneCropCNN-v1" ||
+    (result.label !== "cell_phone" && result.label !== "other_object") ||
+    typeof result.phone_score !== "number" ||
+    typeof result.threshold !== "number"
+  ) return null;
+  return result as {
+    model: "PhoneCropCNN-v1";
+    label: "cell_phone" | "other_object";
+    phone_score: number;
+    threshold: number;
+  };
+}
+
 function isBrowserEvent(event: IntegrityEvent) {
   return [
     "APP_FOCUS_LOST",
@@ -197,8 +211,8 @@ function isAiEvent(event: IntegrityEvent) {
     "MULTIPLE_PERSONS",
     "PHONE_DETECTED",
     "BACKGROUND_SPEECH",
-    "LIVENESS_FAILED",
     "AI_ENGINE_INTERRUPTED",
+    "IDENTITY_MISMATCH",
   ].includes(event.event_type);
 }
 
@@ -222,7 +236,6 @@ function EvidenceClip({
         const response = await fetch(`${API_BASE}${evidence.download_url}`, {
           headers: {
             Authorization: `Bearer ${token}`,
-            ...TUNNEL_BYPASS_HEADERS,
           },
         });
         if (!response.ok) throw new Error(await response.text());
@@ -286,18 +299,15 @@ function EvidenceClip({
   );
 }
 
-async function login(mode: AccountMode): Promise<Session> {
+async function login(email: string, password: string): Promise<Session> {
   const auth = await api<{ access_token: string; user: User }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({
-      email: accountEmail[mode],
-      password: "password123",
+      email,
+      password,
     }),
   });
-  const bootstrap = await api<Bootstrap>("/dev/bootstrap", {
-    headers: { Authorization: `Bearer ${auth.access_token}` },
-  });
-  return { token: auth.access_token, user: auth.user, bootstrap };
+  return { token: auth.access_token, user: auth.user };
 }
 
 function App() {
@@ -310,13 +320,15 @@ function App() {
   const [reviewNote, setReviewNote] = useState("");
   const loadGeneration = useRef(0);
   const [session, setSession] = useState<Session | null>(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [selected, setSelected] = useState<AssessmentDetail | null>(null);
   const [events, setEvents] = useState<IntegrityEvent[]>([]);
   const [eventFilter, setEventFilter] = useState<EventFilter>("ALL");
   const [users, setUsers] = useState<User[]>([]);
   const [socketState, setSocketState] = useState("offline");
-  const [status, setStatus] = useState("loading");
+  const [status, setStatus] = useState("ready");
   const [error, setError] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [reviewSavingId, setReviewSavingId] = useState<string | null>(null);
@@ -464,7 +476,11 @@ function App() {
     setLastAction(null);
     setSocketState("offline");
     try {
-      const nextSession = await login(nextMode);
+      const nextSession = await login(loginEmail.trim(), loginPassword);
+      if (nextSession.user.role !== nextMode) {
+        setSession(null);
+        throw new Error(`This account does not have the ${nextMode.toLowerCase()} role.`);
+      }
       if (generation !== loadGeneration.current) return;
       setSession(nextSession);
       const headers = { Authorization: `Bearer ${nextSession.token}` };
@@ -501,7 +517,7 @@ function App() {
   }
 
   useEffect(() => {
-    loadMode(mode);
+    if (loginEmail.trim() && loginPassword) loadMode(mode);
   }, [mode]);
 
   useEffect(() => {
@@ -514,7 +530,8 @@ function App() {
       return;
     const wsBase = API_BASE.replace(/^http/, "ws");
     const socket = new WebSocket(
-      `${wsBase}/ws/proctor/assessments/${selected.id}?token=${session.token}`,
+      `${wsBase}/ws/proctor/assessments/${selected.id}`,
+      ["proctorai.v1", `auth.${session.token}`],
     );
     socket.onopen = () => setSocketState("live");
     socket.onclose = () => setSocketState("offline");
@@ -1034,7 +1051,7 @@ function App() {
         <div>
           <span>Occurred</span>
           <strong>
-            {serverDate(activeEvent.occurred_at).toLocaleString()}
+            {formatServerDateTime(activeEvent.occurred_at)} IST
           </strong>
         </div>
         <div>
@@ -1054,13 +1071,34 @@ function App() {
           <StatusBadge status={activeEvent.evidence_status} />
         </div>
       </div>
+      {activeEvent.event_type === "PHONE_DETECTED" && scratchClassifierResult(activeEvent) ? (
+        <section className="scratch-model-review" aria-label="Scratch model second opinion">
+          <div>
+            <strong>Scratch-trained phone classifier</strong>
+            <StatusBadge
+              status={
+                scratchClassifierResult(activeEvent)?.label === "cell_phone"
+                  ? "SUPPORTS PHONE"
+                  : "DISAGREES"
+              }
+            />
+          </div>
+          <p>
+            It classified the detected crop as{" "}
+            <strong>{scratchClassifierResult(activeEvent)?.label === "cell_phone" ? "a phone" : "another object"}</strong>
+            {" "}(raw phone score {(scratchClassifierResult(activeEvent)?.phone_score ?? 0).toFixed(2)}; threshold {(scratchClassifierResult(activeEvent)?.threshold ?? 0).toFixed(2)}).
+          </p>
+          <small>This separate model is experimental. Its score is not a calibrated probability and must not decide a case on its own.</small>
+        </section>
+      ) : null}
       {activeEvent.evidence_files.length && session ? (
         <div className="evidence-clips">
           {activeEvent.evidence_files.map((file) => (
             <EvidenceClip key={file.id} evidence={file} token={session.token} />
           ))}
         </div>
-      ) : eventProof(activeEvent)?.camera_snapshot?.data_url ? (
+      ) : null}
+      {eventProof(activeEvent)?.camera_snapshot?.data_url ? (
         <figure className="proof-image">
           <img
             src={eventProof(activeEvent)?.camera_snapshot?.data_url}
@@ -1071,7 +1109,7 @@ function App() {
           />
           <figcaption>Captured at the time of the integrity signal.</figcaption>
         </figure>
-      ) : (
+      ) : activeEvent.evidence_files.length ? null : (
         <div className="evidence-placeholder">
           <Video size={30} />
           <strong>
@@ -1141,7 +1179,7 @@ function App() {
             {activeEvent.reviews.map((review) => (
               <div key={review.id}>
                 <StatusBadge status={review.decision} />
-                <span>{serverDate(review.reviewed_at).toLocaleString()}</span>
+                <span>{formatServerDateTime(review.reviewed_at)} IST</span>
                 {review.note ? <p>{review.note}</p> : null}
               </div>
             ))}
@@ -1151,6 +1189,56 @@ function App() {
     </article>
   ) : null;
 
+  if (!session) {
+    return (
+      <main className="auth-screen">
+        <form
+          className="auth-card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void loadMode(mode);
+          }}
+        >
+          <div className="auth-mark"><ShieldCheck size={24} /></div>
+          <p className="eyebrow">ProctorAI workspace</p>
+          <h1>Sign in to continue</h1>
+          <p>Use your university or examiner account to access your workspace.</p>
+          <label>
+            Email address
+            <input
+              type="email"
+              autoComplete="username"
+              required
+              value={loginEmail}
+              onChange={(event) => setLoginEmail(event.target.value)}
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              autoComplete="current-password"
+              required
+              value={loginPassword}
+              onChange={(event) => setLoginPassword(event.target.value)}
+            />
+          </label>
+          {error ? <p className="auth-error" role="alert">{error}</p> : null}
+          <button className="primary-button" type="submit" disabled={status === "loading"}>
+            {status === "loading" ? "Signing in…" : "Sign in"}
+          </button>
+          <small>Contact your administrator if you need an account.</small>
+          <small>
+            Signing in as a {mode === "EXAMINER" ? "examiner" : "proctor"}?{" "}
+            <a href={mode === "EXAMINER" ? "#/proctor/monitoring" : "#/examiner/overview"}>
+              Switch workspace
+            </a>
+          </small>
+        </form>
+      </main>
+    );
+  }
+
   return (
     <Workspace
       route={route}
@@ -1159,6 +1247,14 @@ function App() {
       name={session?.user.full_name ?? ""}
       status={mode === "PROCTOR" && status === "ready" ? socketState : status}
       onRefresh={() => void loadMode(mode)}
+      onLogout={() => {
+        setSession(null);
+        setLoginPassword("");
+        setAssessments([]);
+        setSelected(null);
+        setEvents([]);
+        setUsers([]);
+      }}
       actions={
         mode === "EXAMINER" &&
         ["overview", "assessments"].includes(route.page) ? (
@@ -1596,8 +1692,8 @@ function App() {
                   <h3>Choose proctoring features</h3>
                   <p>
                     Candidate setup and monitoring follow these settings. Phone
-                    detection and liveness require camera access even when face
-                    monitoring is off.
+                    detection require camera access even when face monitoring
+                    is off.
                   </p>
                   <FeatureChoices
                     rules={creationRules}
@@ -2118,10 +2214,7 @@ function App() {
                           <StatusBadge status={event.severity} />
                         </td>
                         <td>
-                          {serverDate(event.occurred_at).toLocaleTimeString(
-                            [],
-                            { hour: "2-digit", minute: "2-digit" },
-                          )}
+                          {formatServerTime(event.occurred_at)} IST
                         </td>
                         <td>
                           <button
@@ -2219,10 +2312,7 @@ function App() {
                     <div className="queue-item-top">
                       <StatusBadge status={event.severity} />
                       <time>
-                        {serverDate(event.occurred_at).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                        {formatServerTime(event.occurred_at)} IST
                       </time>
                     </div>
                     <strong>
@@ -2389,7 +2479,7 @@ function App() {
               icon: <Video size={24} />,
               title: "A smooth candidate setup",
               content:
-                "Candidates complete consent, connection, full-display screen recording, camera, microphone, display and liveness checks. The assessment opens when its requirements pass.",
+                "Candidates complete consent, connection, full-display screen recording, camera, microphone and display checks. The assessment opens when its requirements pass.",
             },
             {
               icon: <FileCheck2 size={24} />,

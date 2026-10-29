@@ -13,6 +13,7 @@ dependencies = [
   "opencv-python>=4.10.0",
   "pillow>=10.0.0",
   "pydantic>=2.8.0",
+  "torch>=2.6,<3",
   "ultralytics>=8.3.0",
   "uvicorn[standard]>=0.30.6"
 ]
@@ -26,6 +27,9 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+app = ["model_artifacts/phone-classifier/*.pt", "model_artifacts/phone-classifier/*.sha256"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

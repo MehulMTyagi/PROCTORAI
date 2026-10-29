@@ -67,7 +67,10 @@ establish photographer or scene independence, and sigmoid scores are not
 calibrated probabilities.
 
 The existing pretrained YOLO model continues to serve live object detection.
-PhoneCropCNN is available as an independently trained experimental module through
-the prediction CLI. It has not been substituted into automatic event decisions.
+PhoneCropCNN now classifies the crop from each YOLO phone-like detection and adds
+its label and raw score to the event for proctor review. It does not replace YOLO,
+filter alerts, or make automatic event decisions. The model's modest precision
+means the signal should be treated as experimental and reviewed with the image and
+other event context.
 Future evaluation should use consented exam-like images with a new untouched
 test set. The present test set should not be used to tune a subsequent model.

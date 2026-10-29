@@ -225,7 +225,7 @@ export function CandidateHelp() {
           {[
             {
               q: "What equipment do I need?",
-              a: "Use a desktop or laptop with a stable internet connection. Your examiner chooses which camera, microphone, display, fullscreen and liveness checks are required. Setup only asks for the features enabled for your assessment.",
+              a: "Use a desktop or laptop with a stable internet connection. Your examiner chooses which camera, microphone, display and fullscreen checks are required. Setup only asks for the features enabled for your assessment.",
             },
             {
               q: "Why do I need to share my screen?",
@@ -234,10 +234,6 @@ export function CandidateHelp() {
             {
               q: "What if I deny a permission?",
               a: "The related setup check will show what needs attention. Enable the permission in your browser's site settings, then retry the check. You cannot begin until the required checks pass.",
-            },
-            {
-              q: "What happens during the liveness check?",
-              a: "You'll follow prompts to blink or turn your head. Keep your face visible in good lighting, click Capture, and perform the requested action while the camera samples your movement.",
             },
             {
               q: "Does an integrity signal mean I failed?",

@@ -10,10 +10,12 @@ Architecture: RGB 64 × 64 input → 3 × 3 convolutions with 16, 32 and 64 chan
 1,024-to-64 dense layer → ReLU and 25% dropout → one binary-classification logit.
 All convolution and dense-layer parameters are updated during training.
 
-This is a separate supervised image-classification experiment. The existing YOLO
-model continues to locate objects in webcam frames. Classification of a crop and
-full-frame object detection are different tasks; the classifier's test metrics
-must not be reported as the live detector's accuracy.
+YOLO locates objects in webcam frames. ProctorAI now passes each YOLO phone-like
+object crop through PhoneCropCNN and stores its classification as a second opinion
+on the resulting phone alert for the proctor. The scratch model does not suppress
+YOLO alerts or decide misconduct. Classification of a crop and full-frame object
+detection are different tasks; the classifier's test metrics must not be reported
+as the live detector's accuracy.
 
 The first training run is complete. See the [measured results](phone-classifier-results.md)
 for the held-out metrics and limitations.
@@ -94,6 +96,7 @@ the prevalence of phones in exams. COCO may omit some objects. These results
 cannot establish accuracy across real webcams, lighting, occlusion or student
 populations. An exam-specific, consented evaluation remains separate work.
 
-The model is not automatically substituted for YOLO in live proctoring. Its
-trained checkpoint and prediction command demonstrate the independent model;
-any use to filter live events needs an end-to-end evaluation of missed phones.
+The model is not a full-frame detector and does not replace YOLO. It adds a
+second-opinion crop label and raw score to the live proctor review context, but
+does not filter alerts. It should not be used as an automatic decision; broader
+exam-like evaluation is required before changing alert behavior.

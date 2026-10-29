@@ -11,18 +11,18 @@ export function requirements(rules: ProctoringRules | undefined) {
   const on = (key: string) => enabled(rules, key);
   const face = on("FACE_ABSENT") || on("MULTIPLE_PERSONS");
   const phone = on("PHONE_DETECTED");
-  const liveness = on("LIVENESS_FAILED");
-  const camera = on("CAMERA_DISABLED") || face || phone || liveness;
+  const identity = true;
+  const camera = true;
   return {
     face,
     phone,
-    liveness,
+    identity,
     camera,
     microphone: on("MICROPHONE_DISABLED") || on("BACKGROUND_SPEECH"),
     screen: on("SCREEN_RECORDING"),
     fullscreen: on("FULLSCREEN_EXIT"),
     devices: on("DISPLAY_CHECK"),
-    sidecar: face || phone || liveness,
+    sidecar: face || phone || identity,
   };
 }
 export function requiredCheck(

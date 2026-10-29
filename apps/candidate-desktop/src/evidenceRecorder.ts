@@ -86,7 +86,9 @@ export class RollingEvidenceRecorder {
         );
       segment.chunks = [];
     };
-    recorder.start(1000);
+    // Keep the browser's complete recording container intact. Timeslice chunks
+    // are fragments and can be uploaded without the EBML initialization header.
+    recorder.start();
     this.segments.add(segment);
     this.scheduleStop(segment);
   }

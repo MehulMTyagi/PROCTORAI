@@ -10,6 +10,7 @@ export type Assessment = {
   description: string | null;
   status: string;
   duration_minutes: number | null;
+  attempt_status?: string | null;
 };
 export type Question = {
   id: string;
@@ -64,6 +65,21 @@ export type AiModelInfo = {
   cascade_path?: string | null;
   model_path?: string | null;
 };
+export type IdentityVerification = {
+  matched: boolean;
+  reason:
+    | "match"
+    | "no_face"
+    | "multiple_faces"
+    | "reference_no_face"
+    | "reference_multiple_faces"
+    | "identity_mismatch";
+  similarity: number | null;
+  threshold: number;
+  face_count: number;
+  detector: string;
+  recognizer: string;
+};
 export type AiEventCandidate = {
   event_type: "FACE_ABSENT" | "MULTIPLE_PERSONS";
   severity: "HIGH";
@@ -82,11 +98,18 @@ export type AiFrameResponse = {
   events: AiEventCandidate[];
   model: AiModelInfo;
 };
+export type ScratchClassifierResult = {
+  model: "PhoneCropCNN-v1";
+  label: "cell_phone" | "other_object";
+  phone_score: number;
+  threshold: number;
+};
 export type YoloDetectedObject = {
   class_name: string;
   confidence: number;
   bbox: number[];
   phone_like: boolean;
+  scratch_classifier?: ScratchClassifierResult | null;
 };
 export type YoloObjectEventCandidate = {
   event_type: "PHONE_DETECTED";
@@ -99,17 +122,6 @@ export type YoloObjectResponse = {
   objects: YoloDetectedObject[];
   phone_like_objects: YoloDetectedObject[];
   events: YoloObjectEventCandidate[];
-  model: AiModelInfo;
-};
-export type LivenessResponse = {
-  passed: boolean;
-  confidence: number;
-  results: {
-    prompt: string;
-    passed: boolean;
-    reason: string;
-    confidence: number;
-  }[];
   model: AiModelInfo;
 };
 export type Session = { token: string; user: User };
@@ -141,6 +153,13 @@ export type FaceMonitorState = {
   samplesAnalyzed: number;
   detail: string;
 };
+export type IdentityMonitorState = {
+  status: "waiting" | "checking" | "matched" | "review" | "error";
+  faceCount: number | null;
+  similarity: number | null;
+  checkedAt: string | null;
+  detail: string;
+};
 export type ObjectMonitorState = {
   status: string;
   label: string;
@@ -155,12 +174,12 @@ export type ScreenMonitorState = {
 export type ReadinessKey =
   | "backend"
   | "camera"
+  | "identity"
   | "microphone"
   | "sidecar"
   | "screen"
   | "devices"
-  | "fullscreen"
-  | "liveness";
+  | "fullscreen";
 export type CheckStatus = "pending" | "pass" | "warning" | "fail";
 export type ReadinessCheck = {
   key: ReadinessKey;
@@ -168,12 +187,6 @@ export type ReadinessCheck = {
   status: CheckStatus;
   detail: string;
 };
-export type LivenessPrompt = "BLINK" | "TURN_LEFT" | "TURN_RIGHT";
-export type LivenessSample = {
-  prompt: LivenessPrompt;
-  frame_data_urls: string[];
-};
-
 export type SendIntegrityEvent = (
   eventType?: string,
   metadata?: Record<string, unknown>,

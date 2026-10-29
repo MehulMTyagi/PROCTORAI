@@ -4,14 +4,16 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.api.websocket_manager import websocket_manager
+from app.core.audit import write_audit_log
 from app.core.config import settings
+from app.db.base_class import utc_now
 from app.db.session import get_db
 from app.models.assessment import Assessment, AssessmentProctor, ProctoringRule
 from app.models.attempt import Attempt
@@ -137,6 +139,9 @@ async def create_integrity_event(
             status_code=409, detail="This monitoring feature is disabled for the assessment"
         )
 
+    received_at = utc_now()
+    event_metadata = dict(payload.metadata)
+    event_metadata["client_occurred_at"] = payload.occurred_at.isoformat()
     event = IntegrityEvent(
         attempt_id=attempt.id,
         event_type=payload.event_type,
@@ -144,9 +149,9 @@ async def create_integrity_event(
         severity=payload.severity,
         confidence=payload.confidence,
         priority_score=payload.priority_score,
-        occurred_at=payload.occurred_at,
+        occurred_at=received_at,
         evidence_status=payload.evidence_status,
-        payload=payload.metadata,
+        payload=event_metadata,
     )
     db.add(event)
     db.commit()
@@ -180,6 +185,8 @@ async def upload_event_evidence(
         select(ProctoringRule).where(ProctoringRule.assessment_id == attempt.assessment_id)
     )
     screen_rule = policy.rules.get("SCREEN_RECORDING", {}) if policy else {}
+    if kind not in {"VIDEO", "SCREEN_RECORDING"}:
+        raise HTTPException(status_code=400, detail="Unsupported evidence kind")
     if (
         kind == "SCREEN_RECORDING"
         and isinstance(screen_rule, dict)
@@ -195,11 +202,10 @@ async def upload_event_evidence(
         )
 
     max_bytes = settings.max_evidence_mb * 1024 * 1024
-    evidence_root = Path(settings.evidence_dir)
+    evidence_root = Path(settings.evidence_dir).resolve()
     storage_dir = evidence_root / str(attempt.id) / str(event.id)
     storage_dir.mkdir(parents=True, exist_ok=True)
-    suffix = Path(file.filename).suffix or ".bin"
-    storage_key = f"{attempt.id}/{event.id}/{uuid.uuid4().hex}{suffix}"
+    storage_key = f"{attempt.id}/{event.id}/{uuid.uuid4().hex}.webm"
     storage_path = evidence_root / storage_key
 
     digest = hashlib.sha256()
@@ -217,6 +223,9 @@ async def upload_event_evidence(
                     )
                 digest.update(chunk)
                 target.write(chunk)
+    except Exception:
+        storage_path.unlink(missing_ok=True)
+        raise
     finally:
         await file.close()
 
@@ -227,13 +236,23 @@ async def upload_event_evidence(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Evidence hash mismatch"
         )
 
+    if kind in {"VIDEO", "SCREEN_RECORDING"}:
+        with storage_path.open("rb") as source:
+            header = source.read(4)
+        if header != b"\x1aE\xdf\xa3":
+            storage_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="Video evidence is not a complete WebM file. Please retry the capture.",
+            )
+
     evidence_file = EvidenceFile(
         event_id=event.id,
         attempt_id=attempt.id,
         kind=kind,
         storage_key=storage_key,
-        original_filename=file.filename,
-        mime_type=file.content_type or "application/octet-stream",
+        original_filename=Path(file.filename.replace("\\", "/")).name[:255],
+        mime_type="video/webm",
         sha256_hash=computed_hash,
         size_bytes=size_bytes,
         duration_ms=duration_ms,
@@ -243,7 +262,12 @@ async def upload_event_evidence(
     )
     event.evidence_status = EvidenceStatus.READY.value
     db.add(evidence_file)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        storage_path.unlink(missing_ok=True)
+        raise
     db.refresh(evidence_file)
     db.refresh(event)
 
@@ -310,6 +334,7 @@ def list_assessment_events(
 def download_event_evidence(
     event_id: UUID,
     evidence_id: UUID,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FileResponse:
@@ -318,14 +343,27 @@ def download_event_evidence(
     if evidence_file is None or evidence_file.event_id != event.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence not found")
 
-    storage_path = Path(settings.evidence_dir) / evidence_file.storage_key
-    if not storage_path.is_file():
+    evidence_root = Path(settings.evidence_dir).resolve()
+    storage_path = (evidence_root / evidence_file.storage_key).resolve()
+    if not storage_path.is_relative_to(evidence_root) or not storage_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence file missing")
+
+    write_audit_log(
+        db,
+        request,
+        actor_id=current_user.id,
+        action="evidence_downloaded",
+        target_type="evidence_file",
+        target_id=evidence_file.id,
+        details={"event_id": str(event.id)},
+    )
+    db.commit()
 
     return FileResponse(
         storage_path,
         media_type=evidence_file.mime_type,
         filename=evidence_file.original_filename or storage_path.name,
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -337,6 +375,7 @@ def download_event_evidence(
 async def review_event(
     event_id: UUID,
     payload: EventReviewCreate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> IntegrityEventResponse:
@@ -370,6 +409,15 @@ async def review_event(
         event.status = EventStatus.INCONCLUSIVE.value
 
     db.add(review)
+    write_audit_log(
+        db,
+        request,
+        actor_id=current_user.id,
+        action="integrity_event_reviewed",
+        target_type="integrity_event",
+        target_id=event.id,
+        details={"decision": decision},
+    )
     db.commit()
     db.refresh(event)
 

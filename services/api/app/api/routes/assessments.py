@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
 from app.models.assessment import Assessment, AssessmentCandidate, AssessmentProctor, ProctoringRule
+from app.models.attempt import Attempt
 from app.models.enums import UserRole
 from app.models.question import Question
+from app.models.teaching_group import TeachingGroupAssignment
 from app.models.user import User
 from app.schemas.assessments import (
     AssessmentAssignments,
@@ -25,7 +27,12 @@ from app.schemas.assessments import (
 router = APIRouter(prefix="/assessments")
 
 
-def _validate_assignees(db: Session, candidate_ids: list[UUID], proctor_ids: list[UUID]) -> None:
+def _validate_assignees(
+    db: Session,
+    candidate_ids: list[UUID],
+    proctor_ids: list[UUID],
+    current_user: User,
+) -> None:
     for ids, role in ((candidate_ids, UserRole.CANDIDATE), (proctor_ids, UserRole.PROCTOR)):
         if not ids:
             continue
@@ -33,6 +40,30 @@ def _validate_assignees(db: Session, candidate_ids: list[UUID], proctor_ids: lis
         if found != set(ids):
             raise HTTPException(
                 status_code=400, detail=f"Select valid {role.value.lower()} accounts"
+            )
+    if candidate_ids and current_user.role == UserRole.EXAMINER.value:
+        assignments = db.scalars(
+            select(TeachingGroupAssignment).where(
+                TeachingGroupAssignment.examiner_id == current_user.id
+            )
+        ).all()
+        allowed_groups = {
+            (item.program, item.admission_year, item.section) for item in assignments
+        }
+        students = db.scalars(
+            select(User).where(
+                User.id.in_(candidate_ids), User.role == UserRole.CANDIDATE.value
+            )
+        ).all()
+        allowed_ids = {
+            student.id
+            for student in students
+            if (student.program, student.admission_year, student.section) in allowed_groups
+        }
+        if allowed_ids != set(candidate_ids):
+            raise HTTPException(
+                status_code=403,
+                detail="One or more candidates are outside your assigned teaching groups",
             )
 
 
@@ -85,7 +116,7 @@ def create_assessment(
     current_user: User = Depends(require_roles(UserRole.EXAMINER, UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ) -> Assessment:
-    _validate_assignees(db, payload.candidate_ids, payload.proctor_ids)
+    _validate_assignees(db, payload.candidate_ids, payload.proctor_ids, current_user)
     assessment = Assessment(
         title=payload.title,
         description=payload.description,
@@ -123,7 +154,7 @@ def create_assessment(
 def list_assessments(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> list[Assessment]:
+) -> list[AssessmentResponse]:
     if current_user.role == UserRole.ADMIN.value:
         statement = select(Assessment).order_by(Assessment.created_at.desc())
     elif current_user.role == UserRole.EXAMINER.value:
@@ -147,7 +178,24 @@ def list_assessments(
             .order_by(Assessment.created_at.desc())
         )
 
-    return list(db.scalars(statement).all())
+    assessments = list(db.scalars(statement).all())
+    if current_user.role != UserRole.CANDIDATE.value or not assessments:
+        return assessments
+
+    statuses = dict(
+        db.execute(
+            select(Attempt.assessment_id, Attempt.status).where(
+                Attempt.candidate_id == current_user.id,
+                Attempt.assessment_id.in_([item.id for item in assessments]),
+            )
+        ).all()
+    )
+    return [
+        AssessmentResponse.model_validate(assessment).model_copy(
+            update={"attempt_status": statuses.get(assessment.id)}
+        )
+        for assessment in assessments
+    ]
 
 
 @router.get("/{assessment_id}", response_model=AssessmentDetailResponse)
@@ -203,7 +251,7 @@ def replace_assignments(
 ) -> AssessmentDetailResponse:
     assessment = _get_assessment(db, assessment_id)
     _ensure_examiner_owns_assessment(assessment, current_user)
-    _validate_assignees(db, payload.candidate_ids, payload.proctor_ids)
+    _validate_assignees(db, payload.candidate_ids, payload.proctor_ids, current_user)
     db.execute(
         delete(AssessmentCandidate).where(AssessmentCandidate.assessment_id == assessment_id)
     )
@@ -274,6 +322,7 @@ def assign_candidate(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="User is not a candidate"
         )
+    _validate_assignees(db, [user.id], [], current_user)
     if db.get(AssessmentCandidate, (assessment_id, payload.user_id)) is None:
         db.add(AssessmentCandidate(assessment_id=assessment_id, candidate_id=payload.user_id))
         db.commit()

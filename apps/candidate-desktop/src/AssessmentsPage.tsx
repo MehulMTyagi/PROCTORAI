@@ -25,6 +25,8 @@ export default function AssessmentsPage(props: Props) {
   const [search, setSearch] = useState("");
   const available = (assessment: Assessment) =>
     ["ACTIVE", "PUBLISHED"].includes(assessment.status);
+  const completed = (assessment: Assessment) =>
+    assessment.attempt_status === "SUBMITTED";
   const visible = props.assessments.filter(
     (item) =>
       (filter === "ALL" ||
@@ -166,10 +168,16 @@ export default function AssessmentsPage(props: Props) {
                   <span
                     className={
                       "badge " +
-                      (available(assessment) ? "tone-success" : "tone-neutral")
+                      (completed(assessment)
+                        ? "tone-neutral"
+                        : available(assessment)
+                          ? "tone-success"
+                          : "tone-neutral")
                     }
                   >
-                    {assessment.status.toLowerCase()}
+                    {completed(assessment)
+                      ? "completed"
+                      : assessment.status.toLowerCase()}
                   </span>
                 </div>
                 <div className="assessment-info">
@@ -194,18 +202,23 @@ export default function AssessmentsPage(props: Props) {
                 </div>
                 <div className="assessment-card-footer">
                   <span>
-                    {available(assessment)
+                    {completed(assessment)
+                      ? "You have submitted this assessment"
+                      : available(assessment)
                       ? "Ready for preparation"
                       : "This assessment is not open"}
                   </span>
                   <button
-                    disabled={props.busy || !available(assessment)}
+                    disabled={props.busy || !available(assessment) || completed(assessment)}
                     onClick={() => props.onOpen(assessment.id)}
                   >
-                    {props.attemptedAssessmentIds.includes(assessment.id)
+                    {completed(assessment)
+                      ? "Completed"
+                      : assessment.attempt_status === "IN_PROGRESS" ||
+                          props.attemptedAssessmentIds.includes(assessment.id)
                       ? "Continue"
                       : "Prepare"}
-                    <ArrowRight size={16} />
+                    {!completed(assessment) ? <ArrowRight size={16} /> : null}
                   </button>
                 </div>
               </article>
@@ -221,7 +234,7 @@ export default function AssessmentsPage(props: Props) {
           <strong>A quick setup. A focused assessment.</strong>
           <p>
             You'll check your connection and any camera, microphone, screen
-            recording or liveness requirements enabled by your examiner.
+            recording and device requirements enabled for your assessment.
           </p>
         </div>
         <a href="#/help">

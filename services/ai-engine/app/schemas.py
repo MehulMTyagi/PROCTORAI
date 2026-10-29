@@ -32,7 +32,7 @@ class LivenessConfig(BaseModel):
 
 class AnalyzeFrameRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=128)
-    frame_data_url: str | None = None
+    frame_data_url: str | None = Field(default=None, max_length=2_000_000)
     observed_face_count: int | None = Field(default=None, ge=0, le=10)
     captured_at: datetime = Field(default_factory=utc_now)
     config: FaceMonitorConfig = Field(default_factory=FaceMonitorConfig)
@@ -44,17 +44,25 @@ class AnalyzeFrameRequest(BaseModel):
         return self
 
 
+class ScratchClassifierResult(BaseModel):
+    model: Literal["PhoneCropCNN-v1"]
+    label: Literal["cell_phone", "other_object"]
+    phone_score: float = Field(ge=0, le=1)
+    threshold: float = Field(ge=0.1, le=0.9)
+
+
 class DetectedObject(BaseModel):
-    class_name: str
+    class_name: str = Field(min_length=1, max_length=64)
     confidence: float = Field(ge=0, le=1)
-    bbox: list[float] = Field(default_factory=list)
+    bbox: list[float] = Field(default_factory=list, max_length=4)
     phone_like: bool = False
+    scratch_classifier: ScratchClassifierResult | None = None
 
 
 class DetectObjectsRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=128)
-    frame_data_url: str | None = None
-    observed_objects: list[DetectedObject] | None = None
+    frame_data_url: str | None = Field(default=None, max_length=2_000_000)
+    observed_objects: list[DetectedObject] | None = Field(default=None, max_length=100)
     captured_at: datetime = Field(default_factory=utc_now)
     config: ObjectMonitorConfig = Field(default_factory=ObjectMonitorConfig)
 
@@ -66,24 +74,26 @@ class DetectObjectsRequest(BaseModel):
 
 
 class ObservedLivenessSignals(BaseModel):
-    face_counts: list[int] = Field(default_factory=list)
-    eye_counts: list[int] = Field(default_factory=list)
-    face_center_offsets: list[float] = Field(default_factory=list)
-    motion_scores: list[float] = Field(default_factory=list)
-    upper_motion_scores: list[float] = Field(default_factory=list)
+    face_counts: list[int] = Field(default_factory=list, max_length=16)
+    eye_counts: list[int] = Field(default_factory=list, max_length=16)
+    face_center_offsets: list[float] = Field(default_factory=list, max_length=16)
+    motion_scores: list[float] = Field(default_factory=list, max_length=16)
+    upper_motion_scores: list[float] = Field(default_factory=list, max_length=16)
     profile_left_seen: bool = False
     profile_right_seen: bool = False
 
 
 class LivenessPromptSample(BaseModel):
     prompt: Literal["BLINK", "TURN_LEFT", "TURN_RIGHT"]
-    frame_data_urls: list[str] = Field(default_factory=list, max_length=16)
+    frame_data_urls: list[str] = Field(default_factory=list, max_length=8)
     observed: ObservedLivenessSignals | None = None
 
     @model_validator(mode="after")
     def require_frames_or_observation(self) -> "LivenessPromptSample":
         if not self.frame_data_urls and self.observed is None:
             raise ValueError("Either frame_data_urls or observed liveness signals are required")
+        if any(len(frame) > 2_000_000 for frame in self.frame_data_urls):
+            raise ValueError("Each liveness frame must be at most 2 MB of encoded data")
         return self
 
 
@@ -92,6 +102,13 @@ class VerifyLivenessRequest(BaseModel):
     samples: list[LivenessPromptSample] = Field(min_length=1, max_length=6)
     captured_at: datetime = Field(default_factory=utc_now)
     config: LivenessConfig = Field(default_factory=LivenessConfig)
+
+    @model_validator(mode="after")
+    def limit_total_encoded_frames(self) -> "VerifyLivenessRequest":
+        total_chars = sum(len(frame) for sample in self.samples for frame in sample.frame_data_urls)
+        if total_chars > 8_000_000:
+            raise ValueError("Total liveness frame data must be at most 8 MB")
+        return self
 
 
 class ModelInfo(BaseModel):
@@ -162,3 +179,25 @@ class VerifyLivenessResponse(BaseModel):
     confidence: float = Field(ge=0, le=1)
     results: list[LivenessPromptResult]
     model: ModelInfo
+
+
+class VerifyIdentityRequest(BaseModel):
+    frame_data_url: str = Field(min_length=1, max_length=2_000_000)
+    reference_data_url: str = Field(min_length=1, max_length=2_000_000)
+
+
+class VerifyIdentityResponse(BaseModel):
+    matched: bool
+    reason: Literal[
+        "match",
+        "no_face",
+        "multiple_faces",
+        "reference_no_face",
+        "reference_multiple_faces",
+        "identity_mismatch",
+    ]
+    similarity: float | None = Field(default=None, ge=-1, le=1)
+    threshold: float
+    face_count: int
+    detector: str
+    recognizer: str

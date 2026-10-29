@@ -1,7 +1,16 @@
 import { useState } from "react";
 
 export type RuleMap = Record<string, Record<string, unknown>>;
-type Person = { id: string; full_name: string; email: string; role: string };
+type Person = {
+  id: string;
+  full_name: string;
+  email: string;
+  role: string;
+  roll_number?: string | null;
+  program?: string | null;
+  admission_year?: number | null;
+  section?: string | null;
+};
 
 export const features = [
   {
@@ -13,11 +22,6 @@ export const features = [
     name: "Phone detection",
     detail: "Detect phone-like objects. Requires camera access.",
     keys: ["PHONE_DETECTED"],
-  },
-  {
-    name: "Liveness verification",
-    detail: "Live-camera prompts before the test. Requires camera access.",
-    keys: ["LIVENESS_FAILED"],
   },
   {
     name: "Microphone monitoring",
@@ -127,7 +131,6 @@ export function FeatureChoices({
                     "FACE_ABSENT",
                     "MULTIPLE_PERSONS",
                     "PHONE_DETECTED",
-                    "LIVENESS_FAILED",
                   ].some((key) => next[key]?.enabled !== false);
                   next.CAMERA_DISABLED = {
                     ...next.CAMERA_DISABLED,
@@ -166,7 +169,7 @@ export function PeopleChoices({
   const [query, setQuery] = useState("");
   const available = people.filter((person) => person.role === role);
   const visible = available.filter((person) =>
-    `${person.full_name} ${person.email}`
+    `${person.full_name} ${person.email} ${person.roll_number ?? ""} ${person.program ?? ""} ${person.admission_year ?? ""} ${person.section ?? ""}`
       .toLowerCase()
       .includes(query.toLowerCase()),
   );
@@ -216,7 +219,13 @@ export function PeopleChoices({
             />
             <span>
               <strong>{person.full_name}</strong>
-              <small>{person.email}</small>
+            <small>
+              {person.roll_number ? `${person.roll_number} · ` : ""}
+              {person.email}
+              {person.program && person.admission_year && person.section
+                ? ` · ${person.program} ${person.admission_year} · Section ${person.section}`
+                : ""}
+            </small>
             </span>
           </label>
         ))}

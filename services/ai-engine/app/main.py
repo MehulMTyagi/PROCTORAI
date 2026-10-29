@@ -1,46 +1,92 @@
+import logging
 import os
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.debounce import FaceEventDebouncer
+from app.face_identity import FaceIdentityVerifier
 from app.schemas import (
     AnalyzeFrameRequest,
     AnalyzeFrameResponse,
+    DetectedObject,
     DetectObjectsRequest,
     DetectObjectsResponse,
-    DetectedObject,
     LivenessPromptResult,
     ModelInfo,
     ObjectEventCandidate,
+    VerifyIdentityRequest,
+    VerifyIdentityResponse,
     VerifyLivenessRequest,
     VerifyLivenessResponse,
     utc_now,
 )
-from app.vision import LivenessFrameSignals, OpenCvFaceDetector, OpenCvLivenessVerifier, YoloObjectDetector
+from app.vision import (
+    LivenessFrameSignals,
+    OpenCvFaceDetector,
+    OpenCvLivenessVerifier,
+    YoloObjectDetector,
+)
 
-app = FastAPI(title="ProctorAI AI Engine", version="0.1.0")
+APP_ENV = os.getenv("APP_ENV", "development").lower()
+app = FastAPI(
+    title="ProctorAI AI Engine",
+    version="0.1.0",
+    docs_url=None if APP_ENV in {"production", "prod"} else "/docs",
+    redoc_url=None if APP_ENV in {"production", "prod"} else "/redoc",
+    openapi_url=None if APP_ENV in {"production", "prod"} else "/openapi.json",
+)
 cors_origins = [
     origin.strip()
     for origin in os.getenv(
-        "CORS_ORIGINS",
-        "http://localhost:5174,http://127.0.0.1:5174",
+        "AI_CORS_ORIGINS",
+        "http://localhost:5174,http://127.0.0.1:5174,tauri://localhost,http://tauri.localhost",
     ).split(",")
     if origin.strip()
 ]
-cors_origin_regex = os.getenv("CORS_ORIGIN_REGEX", r"https://.*\.vercel\.app")
+cors_origin_regex = os.getenv("AI_CORS_ORIGIN_REGEX")
+trusted_hosts = [
+    host.strip()
+    for host in os.getenv(
+        "AI_TRUSTED_HOSTS", "localhost,127.0.0.1,tauri.localhost,testserver"
+    ).split(",")
+    if host.strip()
+]
+if APP_ENV in {"production", "prod"} and (
+    not cors_origins
+    or any(
+        not (
+            origin.startswith("https://")
+            or origin in {"tauri://localhost", "http://tauri.localhost"}
+        )
+        or "*" in origin
+        for origin in cors_origins
+    )
+    or cors_origin_regex
+    or not trusted_hosts
+    or "*" in trusted_hosts
+):
+    raise RuntimeError(
+        "Production AI service requires exact HTTPS AI_CORS_ORIGINS and AI_TRUSTED_HOSTS"
+    )
+IDENTITY_THRESHOLD = float(os.getenv("IDENTITY_SIMILARITY_THRESHOLD", "0.363"))
+if not 0.1 <= IDENTITY_THRESHOLD <= 0.9:
+    raise RuntimeError("IDENTITY_SIMILARITY_THRESHOLD must be between 0.1 and 0.9")
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_origin_regex=cors_origin_regex,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 detector = OpenCvFaceDetector()
 object_detector = YoloObjectDetector()
 liveness_verifier = OpenCvLivenessVerifier()
+identity_verifier = FaceIdentityVerifier()
 debouncer = FaceEventDebouncer()
 
 
@@ -50,7 +96,7 @@ def model_info() -> ModelInfo:
         name=info.name,
         version=info.version,
         detector=info.detector,
-        cascade_path=info.cascade_path,
+        cascade_path=None,
     )
 
 
@@ -60,7 +106,7 @@ def object_model_info() -> ModelInfo:
         name=info.name,
         version=info.version,
         detector=info.detector,
-        model_path=info.model_path,
+        model_path=None,
     )
 
 
@@ -70,8 +116,8 @@ def liveness_model_info() -> ModelInfo:
         name=info.name,
         version=info.version,
         detector=info.detector,
-        cascade_path=info.cascade_path,
-        model_path=info.model_path,
+        cascade_path=None,
+        model_path=None,
     )
 
 
@@ -89,6 +135,8 @@ def health() -> dict[str, object]:
 
 @app.post("/analyze-frame", response_model=AnalyzeFrameResponse)
 def analyze_frame(payload: AnalyzeFrameRequest) -> AnalyzeFrameResponse:
+    if APP_ENV in {"production", "prod"} and payload.observed_face_count is not None:
+        raise HTTPException(status_code=400, detail="Observed test signals are disabled")
     try:
         face_count = (
             payload.observed_face_count
@@ -119,6 +167,8 @@ def analyze_frame(payload: AnalyzeFrameRequest) -> AnalyzeFrameResponse:
 
 @app.post("/detect-objects", response_model=DetectObjectsResponse)
 def detect_objects(payload: DetectObjectsRequest) -> DetectObjectsResponse:
+    if APP_ENV in {"production", "prod"} and payload.observed_objects is not None:
+        raise HTTPException(status_code=400, detail="Observed test signals are disabled")
     try:
         objects = (
             payload.observed_objects
@@ -129,6 +179,7 @@ def detect_objects(payload: DetectObjectsRequest) -> DetectObjectsResponse:
                     confidence=item.confidence,
                     bbox=item.bbox,
                     phone_like=item.phone_like,
+                    scratch_classifier=item.scratch_classifier,
                 )
                 for item in object_detector.detect_objects(
                     payload.frame_data_url or "",
@@ -141,7 +192,10 @@ def detect_objects(payload: DetectObjectsRequest) -> DetectObjectsResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"YOLO object detection unavailable: {exc}") from exc
+        logging.getLogger(__name__).exception("YOLO object detection failed")
+        raise HTTPException(
+            status_code=503, detail="YOLO object detection is unavailable"
+        ) from exc
 
     phone_like_objects = [item for item in objects if item.phone_like]
     events = [
@@ -155,6 +209,11 @@ def detect_objects(payload: DetectObjectsRequest) -> DetectObjectsResponse:
                 "bbox": phone_like_objects[0].bbox,
                 "detector": object_model_info().detector,
                 "model": object_model_info().model_dump(),
+                "scratch_classifier": (
+                    phone_like_objects[0].scratch_classifier.model_dump()
+                    if phone_like_objects[0].scratch_classifier
+                    else None
+                ),
             },
         )
     ] if phone_like_objects else []
@@ -314,6 +373,10 @@ def _evaluate_liveness_prompt(prompt: str, signals: list[LivenessFrameSignals], 
 
 @app.post("/verify-liveness", response_model=VerifyLivenessResponse)
 def verify_liveness(payload: VerifyLivenessRequest) -> VerifyLivenessResponse:
+    if APP_ENV in {"production", "prod"} and any(
+        sample.observed is not None for sample in payload.samples
+    ):
+        raise HTTPException(status_code=400, detail="Observed test signals are disabled")
     results: list[LivenessPromptResult] = []
     try:
         for sample in payload.samples:
@@ -339,3 +402,18 @@ def verify_liveness(payload: VerifyLivenessRequest) -> VerifyLivenessResponse:
         results=results,
         model=liveness_model_info(),
     )
+
+
+@app.post("/verify-identity", response_model=VerifyIdentityResponse)
+def verify_identity(payload: VerifyIdentityRequest) -> VerifyIdentityResponse:
+    try:
+        result = identity_verifier.verify(
+            payload.frame_data_url,
+            payload.reference_data_url,
+            IDENTITY_THRESHOLD,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return VerifyIdentityResponse(**result)

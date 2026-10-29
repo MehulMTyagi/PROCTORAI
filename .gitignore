@@ -38,5 +38,12 @@ output/
 *.pt
 *.pth
 
+# Ship the face identity models required by the AI sidecar.
+!services/ai-engine/models/face-identity/*.onnx
+
 # Reproducible ML experiment artifacts (large manifests, charts, checkpoints)
 models/phone-classifier/
+!services/ai-engine/app/model_artifacts/
+!services/ai-engine/app/model_artifacts/phone-classifier/
+!services/ai-engine/app/model_artifacts/phone-classifier/*.pt
+!services/ai-engine/app/model_artifacts/phone-classifier/*.sha256

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BookOpen,
@@ -12,6 +13,8 @@ import "./styles.css";
 import "./portal.css";
 import "./legibility.css";
 import AssessmentsPage from "./AssessmentsPage";
+import LoginPage from "./LoginPage";
+import IdentityEnrollmentPage from "./IdentityEnrollmentPage";
 import SetupPage from "./SetupPage";
 import TestPage from "./TestPage";
 import { CandidateHelp, CandidateHome } from "./PortalPages";
@@ -29,8 +32,8 @@ import {
   type CheckStatus,
   type EvidenceFile,
   type IntegrityEvent,
-  type LivenessResponse,
-  type LivenessSample,
+  type IdentityMonitorState,
+  type IdentityVerification,
   type PendingOperation,
   type Question,
   type ReadinessCheck,
@@ -41,10 +44,13 @@ import {
   type YoloObjectResponse,
 } from "./types";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8010";
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL;
+if (import.meta.env.PROD && !configuredApiBase?.startsWith("https://")) {
+  throw new Error("Production builds require VITE_API_BASE_URL to use HTTPS.");
+}
+const API_BASE = configuredApiBase ?? "http://127.0.0.1:8010";
 const AI_ENGINE_BASE =
   import.meta.env.VITE_AI_ENGINE_URL ?? "http://127.0.0.1:8765";
-const TUNNEL_BYPASS_HEADERS = { "bypass-tunnel-reminder": "1" };
 const PRE_ROLL_MS = 5000;
 const POST_ROLL_MS = 5000;
 
@@ -57,7 +63,6 @@ const RISK_WEIGHTS: Record<string, number> = {
   MICROPHONE_DISABLED: 8,
   BACKGROUND_SPEECH: 7,
   PHONE_DETECTED: 12,
-  LIVENESS_FAILED: 10,
   FACE_ABSENT: 8,
   MULTIPLE_PERSONS: 11,
   AI_ENGINE_INTERRUPTED: 8,
@@ -67,6 +72,7 @@ const RISK_WEIGHTS: Record<string, number> = {
   PRINT_SCREEN_ATTEMPT: 7,
   DEVTOOLS_SHORTCUT: 6,
   SCREEN_SHARE_ATTEMPT: 8,
+  IDENTITY_MISMATCH: 12,
 };
 const BROWSER_ACTIVITY_EVENTS = [
   "APP_FOCUS_LOST",
@@ -100,6 +106,12 @@ const initialChecks: ReadinessCheck[] = [
   },
   { key: "camera", label: "Camera", status: "pending", detail: "Not checked" },
   {
+    key: "identity",
+    label: "Student identity",
+    status: "pending",
+    detail: "University reference not checked",
+  },
+  {
     key: "microphone",
     label: "Microphone",
     status: "pending",
@@ -129,13 +141,15 @@ const initialChecks: ReadinessCheck[] = [
     status: "pending",
     detail: "Not entered",
   },
-  {
-    key: "liveness",
-    label: "Liveness",
-    status: "pending",
-    detail: "Not checked",
-  },
 ];
+
+const initialIdentityMonitor: IdentityMonitorState = {
+  status: "waiting",
+  faceCount: null,
+  similarity: null,
+  checkedAt: null,
+  detail: "Identity check will run during the assessment",
+};
 
 async function api<T>(
   path: string,
@@ -150,14 +164,17 @@ async function api<T>(
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...TUNNEL_BYPASS_HEADERS,
       ...options.headers,
     },
   });
   if (!response.ok) {
     const message = await response.text();
+    let detail = message;
+    try {
+      detail = (JSON.parse(message) as { detail?: string }).detail ?? message;
+    } catch {}
     throw new ApiError(
-      message || `Request failed with status ${response.status}`,
+      detail || `Request failed with status ${response.status}`,
       response.status,
       response.status >= 500,
     );
@@ -173,14 +190,14 @@ function shouldQueueOperation(error: unknown) {
   return !(error instanceof ApiError) || error.retriable;
 }
 
-async function login(): Promise<Session> {
+async function login(email: string, password: string): Promise<Session> {
   const auth = await api<{ access_token: string; user: Session["user"] }>(
     "/auth/login",
     {
       method: "POST",
       body: JSON.stringify({
-        email: "candidate@example.com",
-        password: "password123",
+        email,
+        password,
       }),
     },
   );
@@ -280,6 +297,7 @@ function App() {
     samplesAnalyzed: 0,
     detail: "Waiting for sidecar",
   });
+  const [identityMonitor, setIdentityMonitor] = useState(initialIdentityMonitor);
   const [objectMonitor, setObjectMonitor] = useState({
     status: "idle",
     label: "No object sample",
@@ -293,9 +311,12 @@ function App() {
   const [riskTimeline, setRiskTimeline] = useState<RiskTimelineItem[]>([]);
   const [retryQueue, setRetryQueue] = useState<PendingOperation[]>([]);
   const [simulateOffline, setSimulateOffline] = useState(false);
-  const [status, setStatus] = useState("connecting");
+  const [status, setStatus] = useState("ready");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [identityEnrolled, setIdentityEnrolled] = useState(false);
   const [route, setRoute] = useState<Route>(() =>
     parseRoute(window.location.hash),
   );
@@ -304,6 +325,8 @@ function App() {
   >([]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const identityReferenceRef = useRef<string | null>(null);
+  const identityMismatchRef = useRef({ consecutive: 0, lastEventAt: 0, checking: false });
   const streamRef = useRef<MediaStream | null>(null);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -511,7 +534,6 @@ function App() {
           method: "POST",
           headers: {
             Authorization: "Bearer " + session.token,
-            ...TUNNEL_BYPASS_HEADERS,
           },
           body: formData,
         },
@@ -580,7 +602,7 @@ function App() {
         "FACE_ABSENT",
         "MULTIPLE_PERSONS",
         "PHONE_DETECTED",
-        "LIVENESS_FAILED",
+        "IDENTITY_MISMATCH",
         "CAMERA_DISABLED",
         "BACKGROUND_SPEECH",
         "AI_ENGINE_INTERRUPTED",
@@ -671,26 +693,66 @@ function App() {
     }
   }
 
-  async function connect() {
+  async function refreshAssessments() {
+    if (!session) return;
     setStatus("connecting");
     setError(null);
     try {
-      const nextSession = await login();
-      setSession(nextSession);
-      await loadAssessments(nextSession.token);
+      await loadAssessments(session.token);
       setStatus("ready");
-    } catch {
-      setSession(null);
+    } catch (nextError) {
       setStatus("error");
-      setError(
-        "Unable to connect to your assessment service. Please reconnect when the service is available.",
-      );
+      setError(errorMessage(nextError, "Unable to load your assessments."));
     }
   }
 
-  useEffect(() => {
-    void connect();
-  }, []);
+  async function completeSignIn(nextSession: Session) {
+    const identityReference = await fetchIdentityReference(nextSession.token);
+    identityReferenceRef.current = identityReference;
+    identityMismatchRef.current = { consecutive: 0, lastEventAt: 0, checking: false };
+    setIdentityEnrolled(Boolean(identityReference));
+    setSession(nextSession);
+    if (identityReference) await loadAssessments(nextSession.token);
+    setLoginPassword("");
+    setStatus("ready");
+  }
+
+  async function signIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("connecting");
+    setError(null);
+    try {
+      const nextSession = await login(loginEmail.trim(), loginPassword);
+      await completeSignIn(nextSession);
+    } catch (nextError) {
+      setSession(null);
+      setStatus("error");
+      setError(errorMessage(nextError, "Sign-in failed. Check your email and password."));
+    }
+  }
+
+  async function requestCandidateActivation(email: string) {
+    return api<{ email: string; message: string; dev_verification_code?: string | null }>(
+      "/auth/activation/request",
+      { method: "POST", body: JSON.stringify({ email }) },
+    );
+  }
+
+  async function activateCandidateAccount(email: string, code: string, password: string) {
+    setStatus("connecting");
+    setError(null);
+    try {
+      const auth = await api<{ access_token: string; user: Session["user"] }>("/auth/activation/complete", {
+        method: "POST",
+        body: JSON.stringify({ email, code, password }),
+      });
+      await completeSignIn({ token: auth.access_token, user: auth.user });
+    } catch (nextError) {
+      setStatus("error");
+      setError(errorMessage(nextError, "Account activation failed."));
+      throw nextError;
+    }
+  }
 
   const activeAttempt =
     attempt && attempt.status !== "SUBMITTED" ? attempt : null;
@@ -871,7 +933,8 @@ function App() {
       {
         event_type: eventType,
         severity,
-        confidence: automatic ? 1 : 0.88,
+        confidence:
+          eventType === "IDENTITY_MISMATCH" ? 0.5 : automatic ? 1 : 0.88,
         priority_score: priorityScore,
         occurred_at: capturedAt,
         evidence_status: captureClip ? "PENDING" : "READY",
@@ -924,7 +987,6 @@ function App() {
     const timeout = window.setTimeout(() => controller.abort(), 20000);
     try {
       const response = await fetch(`${AI_ENGINE_BASE}/health`, {
-        headers: TUNNEL_BYPASS_HEADERS,
         signal: controller.signal,
       });
       if (!response.ok) throw new Error(`Sidecar returned ${response.status}`);
@@ -1116,12 +1178,185 @@ function App() {
     )
       return null;
 
-    canvas.width = 224;
-    canvas.height = 168;
+    if (!video.videoWidth || !video.videoHeight) return null;
+    const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     const context = canvas.getContext("2d");
     if (!context) return null;
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.62);
+    return canvas.toDataURL("image/jpeg", 0.76);
+  }
+
+  async function identityReferenceDataUrl() {
+    if (identityReferenceRef.current) return identityReferenceRef.current;
+    if (!session) throw new Error("Sign in with your university account to verify identity.");
+    const reference = await fetchIdentityReference(session.token);
+    if (!reference) throw new Error("No identity photo is registered for this account.");
+    identityReferenceRef.current = reference;
+    return reference;
+  }
+
+  async function fetchIdentityReference(token: string) {
+    const response = await fetch(`${API_BASE}/identity/reference`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) {
+      if (response.status === 404) return null;
+      const detail = await response.text();
+      throw new Error(detail || "Could not load the university identity photo.");
+    }
+    const blob = await response.blob();
+    const reference = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read the university identity photo."));
+      reader.onerror = () => reject(new Error("Could not read the university identity photo."));
+      reader.readAsDataURL(blob);
+    });
+    return reference;
+  }
+
+  async function compareIdentityFrames(frameDataUrl: string, referenceDataUrl: string) {
+    const response = await fetch(`${AI_ENGINE_BASE}/verify-identity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frame_data_url: frameDataUrl, reference_data_url: referenceDataUrl }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) throw new Error((await response.text()) || "Identity verification service is unavailable.");
+    return await response.json() as IdentityVerification;
+  }
+
+  async function verifyIdentityFrame(frameDataUrl: string) {
+    return compareIdentityFrames(frameDataUrl, await identityReferenceDataUrl());
+  }
+
+  async function enrollIdentity(photoDataUrl: string) {
+    if (!session) throw new Error("Sign in before enrolling your identity photo.");
+    let verification: IdentityVerification;
+    try {
+      verification = await compareIdentityFrames(photoDataUrl, photoDataUrl);
+    } catch {
+      throw new Error("Identity verification is unavailable. Check the local AI service and retry.");
+    }
+    if (!verification.matched) {
+      const detail = verification.reason === "no_face"
+        ? "No face was found. Center your face in the frame and try again."
+        : verification.reason === "multiple_faces"
+          ? "More than one face was found. Make sure only you are visible and try again."
+          : "The camera image could not be verified. Adjust your position and lighting, then retry.";
+      throw new Error(detail);
+    }
+
+    const imageBlob = await (await fetch(photoDataUrl)).blob();
+    if (imageBlob.size > 1024 * 1024) throw new Error("Captured photo is too large. Please retry.");
+    const form = new FormData();
+    form.append("image", imageBlob, "identity.jpg");
+    const response = await fetch(`${API_BASE}/identity/reference`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.token}` },
+      body: form,
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) {
+      let message = "Could not save your identity photo.";
+      try {
+        const body = await response.json() as { detail?: string };
+        if (body.detail) message = body.detail;
+      } catch {}
+      throw new Error(message);
+    }
+    identityReferenceRef.current = photoDataUrl;
+    setIdentityEnrolled(true);
+    await loadAssessments(session.token);
+  }
+
+  async function checkIdentityForSetup(frameDataUrl: string) {
+    const result = await verifyIdentityFrame(frameDataUrl);
+    const detail = result.matched
+      ? "Identity matches the university photo linked to this account."
+      : result.reason === "no_face"
+        ? "No face was found. Center your face in the camera and try again."
+        : result.reason === "multiple_faces"
+          ? "More than one face was found. Make sure only you are visible and try again."
+          : result.reason.startsWith("reference_")
+            ? "The university photo could not be verified. Contact your university to update it."
+            : "Your face did not match the university photo. Adjust lighting and try again.";
+    return { passed: result.matched, detail, similarity: result.similarity };
+  }
+
+  async function analyzeIdentitySample() {
+    if (!monitoringActive || !required.identity || !attempt || !session || identityMismatchRef.current.checking) return;
+    const frameDataUrl = captureFrameDataUrl();
+    if (!frameDataUrl) return;
+    identityMismatchRef.current.checking = true;
+    setIdentityMonitor((current) => ({
+      ...current,
+      status: "checking",
+      detail: "Checking the live face against the enrolled identity photo",
+    }));
+    try {
+      const result = await verifyIdentityFrame(frameDataUrl);
+      const checkedAt = new Date().toISOString();
+      if (result.matched) {
+        identityMismatchRef.current.consecutive = 0;
+        setIdentityMonitor({
+          status: "matched",
+          faceCount: result.face_count,
+          similarity: result.similarity,
+          checkedAt,
+          detail: "Live face matches the enrolled identity photo",
+        });
+        return;
+      }
+      identityMismatchRef.current.consecutive += 1;
+      const detail = result.reason === "multiple_faces"
+        ? `${result.face_count} faces detected; only the candidate should be visible`
+        : result.reason === "no_face"
+          ? "No face detected; center your face in the camera"
+          : result.reason.startsWith("reference_")
+            ? "Enrolled identity photo could not be verified; contact support"
+            : "Live face does not match the enrolled identity photo";
+      setIdentityMonitor({
+        status: "review",
+        faceCount: result.face_count,
+        similarity: result.similarity,
+        checkedAt,
+        detail: `${detail} (${identityMismatchRef.current.consecutive}/2 checks)`,
+      });
+      const now = Date.now();
+      if (identityMismatchRef.current.consecutive < 2 || now - identityMismatchRef.current.lastEventAt < 5 * 60_000) return;
+      identityMismatchRef.current.lastEventAt = now;
+      const event = await sendIntegrityEvent("IDENTITY_MISMATCH", {
+        source: "periodic_face_identity_check",
+        candidate_email: session.user.email,
+        similarity: result.similarity,
+        threshold: result.threshold,
+        verification_result: result.reason,
+        face_count: result.face_count,
+        consecutive_mismatches: identityMismatchRef.current.consecutive,
+        detector: result.detector,
+        recognizer: result.recognizer,
+        review_note: "Identity could not be confirmed. Send to a proctor for human review; do not make an automatic misconduct decision.",
+      }, "HIGH", 12, true, frameDataUrl);
+      setIdentityMonitor((current) => ({
+        ...current,
+        detail: event
+          ? `${detail}; sent to the proctor for review`
+          : `${detail}; proctor event could not be synced yet`,
+      }));
+    } catch (error) {
+      setIdentityMonitor((current) => ({
+        ...current,
+        status: "error",
+        checkedAt: new Date().toISOString(),
+        detail: errorMessage(error, "Identity check failed; check the AI service and enrolled photo"),
+      }));
+    } finally {
+      identityMismatchRef.current.checking = false;
+    }
   }
 
   async function analyzeFaceSample(
@@ -1145,12 +1380,13 @@ function App() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...TUNNEL_BYPASS_HEADERS,
         },
         body: JSON.stringify({
           session_id: attempt.id,
           frame_data_url: frameDataUrl,
-          observed_face_count: observedFaceCount,
+          ...(observedFaceCount === undefined
+            ? {}
+            : { observed_face_count: observedFaceCount }),
           config: {
             absent_frame_threshold: 3,
             multiple_frame_threshold: 2,
@@ -1294,7 +1530,6 @@ function App() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...TUNNEL_BYPASS_HEADERS,
         },
         body: JSON.stringify({
           session_id: attempt.id,
@@ -1376,6 +1611,7 @@ function App() {
               class: item.class_name,
               score: Number(item.confidence.toFixed(4)),
               bbox: item.bbox,
+              scratch_classifier: item.scratch_classifier ?? null,
             })),
             review_note:
               "YOLO object detector found a phone-like object in consecutive camera frames.",
@@ -1450,23 +1686,6 @@ function App() {
       },
       "MEDIUM",
       7,
-      false,
-    );
-  }
-
-  function sendLivenessFailedEvent() {
-    void sendIntegrityEvent(
-      "LIVENESS_FAILED",
-      {
-        source: "manual_liveness_demo",
-        detector: "active_liveness_challenge",
-        challenge: "blink_left_right",
-        reason: "challenge_not_completed",
-        review_note:
-          "Active liveness challenge failed or could not be completed; review the evidence clip and camera proof.",
-      },
-      "HIGH",
-      9,
       false,
     );
   }
@@ -1775,7 +1994,7 @@ function App() {
     };
 
     navigator.mediaDevices
-      .getUserMedia({ video: { width: 320, height: 240 }, audio: false })
+      .getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false })
       .then((stream) => {
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop());
@@ -1935,6 +2154,19 @@ function App() {
   }, [monitoringActive, sidecarReady, attempt?.id, required.face]);
 
   useEffect(() => {
+    identityMismatchRef.current = { consecutive: 0, lastEventAt: 0, checking: false };
+    setIdentityMonitor(initialIdentityMonitor);
+    if (!monitoringActive || !required.identity) return;
+    void analyzeIdentitySample();
+    const firstRetry = window.setTimeout(() => void analyzeIdentitySample(), 3000);
+    const interval = window.setInterval(() => void analyzeIdentitySample(), 60_000);
+    return () => {
+      window.clearTimeout(firstRetry);
+      window.clearInterval(interval);
+    };
+  }, [monitoringActive, attempt?.id, required.identity, session?.token]);
+
+  useEffect(() => {
     if (!monitoringActive || !required.phone) return;
     void analyzeObjectSample();
     const interval = window.setInterval(() => void analyzeObjectSample(), 2000);
@@ -1991,44 +2223,6 @@ function App() {
     setConsentAcceptedAt(accepted ? new Date().toISOString() : null);
     if (!accepted) {
       stopScreenCapture();
-    }
-  }
-
-  async function verifyLiveness(samples: LivenessSample[]) {
-    try {
-      const response = await fetch(`${AI_ENGINE_BASE}/verify-liveness`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...TUNNEL_BYPASS_HEADERS,
-        },
-        body: JSON.stringify({
-          session_id: selected?.id ?? session?.user.id ?? "preflight",
-          samples,
-          config: {
-            min_single_face_ratio: 0.45,
-            min_turn_offset: 0.04,
-            min_samples_per_prompt: 6,
-            min_eye_open_count: 1,
-            min_motion_score: 0.035,
-            min_blink_motion_score: 0.025,
-          },
-        }),
-      });
-      if (!response.ok) throw new Error(await response.text());
-      const verification = (await response.json()) as LivenessResponse;
-      const failed = verification.results.filter((result) => !result.passed);
-      return {
-        passed: verification.passed,
-        detail: verification.passed
-          ? `Active liveness passed with ${Math.round(verification.confidence * 100)}% confidence.`
-          : `Liveness failed: ${failed.map((result) => `${result.prompt} ${result.reason}`).join("; ")}`,
-      };
-    } catch (nextError) {
-      return {
-        passed: false,
-        detail: `Local liveness verification failed: ${errorMessage(nextError, "sidecar unavailable")}`,
-      };
     }
   }
 
@@ -2202,6 +2396,13 @@ function App() {
             }
           : current,
       );
+      setAssessments((current) =>
+        current.map((assessment) =>
+          assessment.id === attempt.assessment_id
+            ? { ...assessment, attempt_status: "SUBMITTED" }
+            : assessment,
+        ),
+      );
       setStatus("ready");
     } catch (nextError) {
       setStatus("error");
@@ -2260,6 +2461,34 @@ function App() {
     attempt && selected && attempt.assessment_id === selected.id
       ? selected
       : null;
+
+  if (!session) {
+    return (
+      <LoginPage
+        email={loginEmail}
+        password={loginPassword}
+        busy={status === "connecting"}
+        error={error}
+        onEmailChange={setLoginEmail}
+        onPasswordChange={setLoginPassword}
+        onSubmit={signIn}
+        onRequestActivation={requestCandidateActivation}
+        onActivate={activateCandidateAccount}
+      />
+    );
+  }
+
+  if (!identityEnrolled) {
+    return (
+      <IdentityEnrollmentPage
+        name={session.user.full_name}
+        email={session.user.email}
+        busy={status === "connecting" || status === "loading"}
+        error={error}
+        onEnroll={enrollIdentity}
+      />
+    );
+  }
 
   return (
     <div className={`candidate-shell${attempt ? " exam-shell" : ""}`}>
@@ -2368,6 +2597,7 @@ function App() {
           monitoringActive={monitoringActive}
           sidecarReady={sidecarReady}
           faceMonitor={faceMonitor}
+          identityMonitor={identityMonitor}
           objectMonitor={objectMonitor}
           screenMonitor={screenMonitor}
           aiModel={aiModel}
@@ -2391,7 +2621,6 @@ function App() {
           onFaceDemo={runFaceDemo}
           onPhoneDemo={sendPhoneObjectEvent}
           onVoiceDemo={sendBackgroundVoiceEvent}
-          onLivenessFailedDemo={sendLivenessFailedEvent}
         />
       ) : route.name === "home" ? (
         <CandidateHome
@@ -2408,7 +2637,7 @@ function App() {
           connected={Boolean(session)}
           busy={busyStatus}
           attemptedAssessmentIds={attemptedAssessmentIds}
-          onRefresh={connect}
+          onRefresh={refreshAssessments}
           onOpen={openAssessment}
         />
       ) : (
@@ -2433,7 +2662,7 @@ function App() {
           onSystemCheck={runReadinessChecks}
           onScreenCapture={requestScreenCapture}
           onDeviceAudit={auditConnectedDevices}
-          onLivenessVerify={verifyLiveness}
+          onIdentityVerify={checkIdentityForSetup}
           onFullscreen={requestFullscreen}
           onStart={startAttempt}
         />
